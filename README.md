@@ -1088,7 +1088,7 @@ Ragnarok's source repo is private, so **binary-only** trial packages are attache
 Ephemera repository's GitHub Releases (same pattern as zyvor-fabric), tagged `ragnarok-vX.Y.Z`:
 
 ```bash
-VER=0.5.1
+VER=0.5.2
 curl -LO "https://github.com/hypersdk/ephemera/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz"
 curl -LO "https://github.com/hypersdk/ephemera/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz.sha256"
 sha256sum -c "ragnarok-${VER}-linux-amd64.tar.gz.sha256"
