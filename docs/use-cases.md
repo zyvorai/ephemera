@@ -73,7 +73,12 @@ signed entry.
 For teams already running Kubernetes who want a real VM (not a container)
 for a specific workload — untrusted code, a kernel-dependent test, a legacy
 binary — the `DisposableVm` CRD plus the node-local `ephemera-kube` operator
-lets a VM be requested the same way any other Kubernetes resource is:
+lets a VM be requested the same way any other Kubernetes resource is.
+
+**Product path:** [Ragnarok](https://zyvor.dev/docs/ragnarok) creates those CRs from its
+Ephemera Hub (with OIDC/SSO and RBAC). Install Ephemera first, then Ragnarok — see
+[docs/ragnarok.md](ragnarok.md).
+
 
 ```yaml
 apiVersion: ephemera.zyvor.io/v1

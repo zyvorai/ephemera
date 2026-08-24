@@ -29,7 +29,7 @@ placement across multiple hosts — see "Kubernetes CRD/operator" and "Distribut
 
 > This repository is a complete MVP/control-plane skeleton, not a finished multi-tenant security boundary. Authentication/RBAC, the Firecracker jailer (chroot + uid/gid isolation), cgroup v2 resource control, and per-VM network namespaces are already implemented (see "Auth / RBAC", "Firecracker jailer", "Resource control (cgroup v2)", and "Network namespaces" below) — before exposing it to untrusted tenants, still add seccomp/AppArmor/SELinux policy, quotas, audit logging and stronger image provenance.
 
-See [`docs/use-cases.md`](docs/use-cases.md) for concrete use cases — ephemeral CI runners, a golden-image pipeline, Kubernetes-native disposable workloads, multi-host fleets without Kubernetes, and sandboxed code execution — each grounded in what's actually implemented below.
+See [`docs/use-cases.md`](docs/use-cases.md) for concrete use cases — ephemeral CI runners, a golden-image pipeline, Kubernetes-native disposable workloads, multi-host fleets without Kubernetes, and sandboxed code execution — each grounded in what's actually implemented below. **Ragnarok product path:** [`docs/ragnarok.md`](docs/ragnarok.md).
 
 ## Table of contents
 
@@ -1079,9 +1079,45 @@ and lets the per-node operator (see "Kubernetes CRD/operator" above) do the rest
 side, Ragnarok is just another `DisposableVm` client with no special access — the same CRD/RBAC
 setup in `deploy/k8s/` works for it or for `kubectl apply` directly.
 
+**Ephemera is free (Apache-2.0). Ragnarok is proprietary** (signed `trial.token`
+evaluation, then a renewed JWT from sales@zyvor.dev).
+
+### Download Ragnarok binaries (published here)
+
+Ragnarok's source repo is private, so **binary-only** trial packages are attached to this
+Ephemera repository's GitHub Releases (same pattern as zyvor-fabric), tagged `ragnarok-vX.Y.Z`:
+
+```bash
+VER=0.5.1
+curl -LO "https://github.com/hypersdk/ephemera/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz"
+curl -LO "https://github.com/hypersdk/ephemera/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz.sha256"
+sha256sum -c "ragnarok-${VER}-linux-amd64.tar.gz.sha256"
+tar xzf "ragnarok-${VER}-linux-amd64.tar.gz"
+cd "ragnarok-${VER}-linux-amd64"
+ls -l trial.token                 # keep beside ./ragnarok (or set RAGNAROK_TRIAL_TOKEN)
+./install.sh
+# Edit ragnarok.env (kubeconfig, JWT_SECRET, DATABASE_URL), then:
+set -a && source ragnarok.env && set +a && ./ragnarok
+curl -s http://127.0.0.1:5010/health
+curl -s http://127.0.0.1:5010/api/v1/license/status
+```
+
+Requires Linux x86_64, Kubernetes, and **KubeVirt**. After the token expires email
+**sales@zyvor.dev** for a renewed signed JWT (see `LICENSING.md` / `AFTER-TRIAL.md`
+in the tarball).
+
+**Customer / install guide:** [docs/ragnarok.md](docs/ragnarok.md) — install order, manuals, SSO note.
+Published manuals: [Ephemera](https://zyvor.dev/docs/ephemera-manual) · [Ragnarok](https://zyvor.dev/docs/ragnarok-manual) · [suite](https://zyvor.dev/docs/customer-manuals).
+
 **Setup**, from Ephemera's side, is exactly "Deploy order" above — install the CRD/RBAC/DaemonSet,
 label each capable node `ragnarok.io/ephemera-capable=true`, stage images. Ragnarok has no separate
 install step for Ephemera itself; it only detects what's already there (see below).
+
+**SSO / identity** is entirely Ragnarok's job (local admin, LDAP, Keycloak OIDC with optional
+in-cluster IdP proxy via Ragnarok `--with-oidc`). Ephemera does not terminate browser SSO.
+**Ephemera is free (Apache-2.0); Ragnarok is proprietary** (signed `trial.token`,
+then a renewed JWT from sales@zyvor.dev). Do not put Ragnarok trial signing tools
+or private keys in this repository.
 
 **What Ragnarok adds on top** (`ragnarok/backend/src/ephemera/`, REST surface in
 `routes/ephemera.rs`, UI in the frontend's `EphemeraHub` page):
