@@ -4,3 +4,4 @@
 *.raw
 *.img
 *.iso
+.docs-tools/

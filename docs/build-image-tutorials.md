@@ -3,7 +3,7 @@
 `ephemera build-image` takes a base disk image and applies customizations —
 hostname, package installs, arbitrary commands, SSH-key injection, file
 copy-in, and systemd service enablement — to produce a new, ready-to-boot
-image. Everything runs through [`guestkit`](https://github.com/hypersdk/guestkit)
+image. Everything runs through [`guestkit`](https://github.com/zyvorai/guestkit)
 mounting the image directly with `qemu-nbd` and running commands in a
 `chroot`. There's no libguestfs appliance and **no VM boot involved** — this
 means `build-image` doesn't need `/dev/kvm` at all, only root and the `nbd`

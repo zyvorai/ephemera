@@ -1,4 +1,15 @@
-# Using Ephemera with Ragnarok
+# Ragnarok Integration
+
+## Purpose
+
+Drive Ephemera disposable VMs from Ragnarok UI + SSO.
+
+## How to get there
+
+- Topic id: `ragnarok-integration`
+- Section: **Integrations → Ragnarok Integration**
+
+## Guide
 
 [Ragnarok](https://zyvor.dev/ragnarok) is the primary product UI/API that consumes Ephemera’s Kubernetes path (`DisposableVm` + `ephemera-kube`). Ephemera stays a focused disposable-VM engine; Ragnarok is the operator console, RBAC, and SSO layer on top.
 
@@ -74,3 +85,8 @@ callers; that is separate from the Ragnarok dashboard login and from Ragnarok
 trial tokens (`scripts/trial-tool.py` stays in the private Ragnarok repo only).
 
 See also the longer integration notes in the [root README — Using Ephemera through Ragnarok](../README.md#using-ephemera-through-ragnarok).
+
+## Related pages
+
+- [Getting Started](../../getting-started.md)
+- [Page index](../../PAGE_INDEX.md)

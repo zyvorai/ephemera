@@ -4,9 +4,9 @@
 
 ### Disposable Compute Engine — secure, isolated, short-lived VMs via Firecracker, Cloud Hypervisor, and QEMU/KVM
 
-[![CI](https://github.com/hypersdk/ephemera/actions/workflows/ci.yml/badge.svg)](https://github.com/hypersdk/ephemera/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/github/license/hypersdk/ephemera)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/hypersdk/ephemera?sort=semver)](https://github.com/hypersdk/ephemera/releases)
+[![CI](https://github.com/zyvorai/ephemera/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/ephemera/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/github/license/zyvorai/ephemera)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/zyvorai/ephemera?sort=semver)](https://github.com/zyvorai/ephemera/releases)
 
 [Quick start](#build) · [Use cases](docs/use-cases.md) · [zyvor.dev/docs](https://zyvor.dev/docs?utm_source=github&utm_medium=ephemera) · [Blog](https://zyvor.dev/blog?utm_source=github&utm_medium=ephemera)
 
@@ -1050,17 +1050,17 @@ migration plan).
 **Getting zyvor-fabric**: zyvor-fabric's own repo is private, so its build is published here
 instead, as a self-contained Linux (x86_64) tarball — no cargo/npm required on the target
 machine — attached to this repo's
-[`zyvor-fabric-vX.Y.Z`-tagged releases](https://github.com/hypersdk/ephemera/releases). No
+[`zyvor-fabric-vX.Y.Z`-tagged releases](https://github.com/zyvorai/ephemera/releases). No
 container image is published; install directly on the host:
 
 ```bash
-curl -LO https://github.com/hypersdk/ephemera/releases/download/zyvor-fabric-v0.1.0/zyvor-fabric-0.1.0-linux-x86_64.tar.gz
+curl -LO https://github.com/zyvorai/ephemera/releases/download/zyvor-fabric-v0.1.0/zyvor-fabric-0.1.0-linux-x86_64.tar.gz
 tar xzf zyvor-fabric-0.1.0-linux-x86_64.tar.gz
 cd zyvor-fabric-0.1.0-linux-x86_64
 sudo ./install.sh --start
 ```
 
-The [release](https://github.com/hypersdk/ephemera/releases/tag/zyvor-fabric-v0.1.0) also carries
+The [release](https://github.com/zyvorai/ephemera/releases/tag/zyvor-fabric-v0.1.0) also carries
 an `INSTALL.md` with a full getting-started tutorial (first login, creating your first VM,
 networking, verifying the install, upgrading). The tarball itself bundles
 `zyvor-fabricd`/`zyvorctl`, a matching Ephemera build, guestkit's vendor agents, the web dashboard,
@@ -1089,8 +1089,8 @@ Ephemera repository's GitHub Releases (same pattern as zyvor-fabric), tagged `ra
 
 ```bash
 VER=0.5.2
-curl -LO "https://github.com/hypersdk/ephemera/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz"
-curl -LO "https://github.com/hypersdk/ephemera/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz.sha256"
+curl -LO "https://github.com/zyvorai/ephemera/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz"
+curl -LO "https://github.com/zyvorai/ephemera/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz.sha256"
 sha256sum -c "ragnarok-${VER}-linux-amd64.tar.gz.sha256"
 tar xzf "ragnarok-${VER}-linux-amd64.tar.gz"
 cd "ragnarok-${VER}-linux-amd64"

@@ -21,7 +21,7 @@ jobs:
       - name: Checkout guestkit (sibling path dependency)
         uses: actions/checkout@v4
         with:
-          repository: hypersdk/guestkit
+          repository: zyvorai/guestkit
           path: guestkit
 
       - name: Install Rust
@@ -83,7 +83,7 @@ jobs:
       - name: Checkout guestkit (sibling path dependency)
         uses: actions/checkout@v4
         with:
-          repository: hypersdk/guestkit
+          repository: zyvorai/guestkit
           path: guestkit
 
       - name: Install Rust

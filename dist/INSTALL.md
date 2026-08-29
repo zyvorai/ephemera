@@ -1,7 +1,7 @@
 # Installing zyvor-fabric v0.1.0
 
 A self-contained Linux (x86_64) distribution of **zyvor-fabric**, the control
-plane that drives [Ephemera](https://github.com/hypersdk/ephemera) as its VM
+plane that drives [Ephemera](https://github.com/zyvorai/ephemera) as its VM
 backend. No `cargo`, `npm`, or network access is required on the target
 machine — everything needed is already built into the package.
 

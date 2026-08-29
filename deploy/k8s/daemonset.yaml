@@ -41,7 +41,7 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: ephemera
-          image: ghcr.io/zyvor/ephemera:0.1.0
+          image: ghcr.io/zyvorai/ephemera:0.1.0
           command: ["ephemera", "--config", "/etc/ephemera.toml", "serve"]
           securityContext:
             capabilities:
@@ -72,7 +72,7 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 20
         - name: ephemera-kube
-          image: ghcr.io/zyvor/ephemera:0.1.0
+          image: ghcr.io/zyvorai/ephemera:0.1.0
           command: ["ephemera-kube"]
           env:
             # Must be the real Kubernetes node name — this is what a
