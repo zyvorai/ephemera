@@ -21,6 +21,14 @@ Day-to-day create / exec / pause / TTL / warm-pool jobs.
 
 For full command references, see the [technical docs](/docs/ephemera) and the project's own [README](https://github.com/zyvorai/ephemera#readme). See also: [Use cases](use-cases.md).
 
+## Operate from the console (UX)
+
+1. Open this route from the nav or command palette and wait for live API data.
+2. Use filters/search when present; drill into a row for detail.
+3. For mutating actions: confirm role gates and impact before applying.
+4. **Empty / fail:** Check service health, auth, and that required CRDs/backends for this domain are installed.
+5. **Success:** Live data loads; created/updated objects appear without error toasts.
+
 ## Related pages
 
 - [Getting Started](../../getting-started.md)
