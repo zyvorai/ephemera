@@ -8,7 +8,7 @@
 [![License: Apache-2.0](https://img.shields.io/github/license/zyvorai/ephemera)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/zyvorai/ephemera?sort=semver)](https://github.com/zyvorai/ephemera/releases)
 
-[Quick start](#build) · [Use cases](docs/use-cases.md) · [zyvor.dev/docs](https://zyvor.dev/docs?utm_source=github&utm_medium=ephemera) · [Blog](https://zyvor.dev/blog?utm_source=github&utm_medium=ephemera)
+[Quick start](#build) · [Customer path](#who-does-what-customers) · [Use cases](docs/use-cases.md) · [zyvor.dev/docs](https://zyvor.dev/docs?utm_source=github&utm_medium=ephemera) · [Blog](https://zyvor.dev/blog?utm_source=github&utm_medium=ephemera)
 
 </div>
 
@@ -31,8 +31,63 @@ placement across multiple hosts — see "Kubernetes CRD/operator" and "Distribut
 
 See [`docs/use-cases.md`](docs/use-cases.md) for concrete use cases — ephemeral CI runners, a golden-image pipeline, Kubernetes-native disposable workloads, multi-host fleets without Kubernetes, and sandboxed code execution — each grounded in what's actually implemented below. **Ragnarok product path:** [`docs/ragnarok.md`](docs/ragnarok.md).
 
+## Who does what (customers)
+
+| You need… | Use |
+|-----------|-----|
+| Score / repair a disk **offline** (doctor, passport, fix plans) | **[GuestKit](https://github.com/zyvorai/guestkit)** |
+| **Boot & manage** that qcow2 (network, SSH, TTL, pause/resume, fleets) | **This repo (Ephemera)** |
+| Hypervisor → KVM convert + import | **[h2kvm](https://github.com/zyvorai/h2kvm)** |
+
+**Certify with GuestKit → run & manage with Ephemera → convert/deploy with h2kvm.**
+
+Ephemera already creates TAP/macvtap, optional per-VM **netns + DHCP** (known `guest_ip`),
+cloud-init seeds, CoW overlays, and TTL reaping. GuestKit does **not** duplicate that —
+hand off after the disk is certified.
+
+### End-to-end: certify → run → manage
+
+```bash
+# ── 1. Certify (GuestKit on the same host or CI) ───────────────
+guestkit doctor /path/to/disk.qcow2 --target kvm --explain
+guestkit plan apply virtio.yaml --vm /path/to/disk.qcow2 --yes   # if needed
+guestkit passport emit /path/to/disk.qcow2 --target kvm -o passport.json
+guestkit gate --image /path/to/disk.qcow2 --fail-below 80
+
+# ── 2. Prepare host once (Ephemera) ────────────────────────────
+sudo ./scripts/bootstrap-host.sh          # bridge, dirs, deps
+cargo build --release -p ephemera-cli     # or install release binaries
+
+# ── 3. Run the certified qcow2 ─────────────────────────────────
+# Edit examples/qemu.json → set "image" to your disk and your SSH pubkey.
+sudo ./target/release/ephemera --config /etc/ephemera.toml create \
+  --spec examples/qemu.json
+
+# Day-2
+ephemera list
+ephemera get <id>                 # includes guest_ip for netns mode
+ephemera exec <id> -- hostname
+ephemera pause <id> && ephemera resume <id>
+ephemera delete <id>              # or wait for ttl_seconds
+```
+
+### Pick a network mode (Ephemera owns this)
+
+| Mode | Spec sketch | Guest IP |
+|------|-------------|----------|
+| Lab / SSH | `"network": {"mode":"user","forwards":[{"host_port":2222,"guest_port":22}]}` | QEMU SLIRP DHCP; SSH via `localhost:2222` |
+| LAN DHCP | `"network": {"mode":"tap","bridge":"vmbr0","mac":"06:…"}` | Your bridge’s DHCP |
+| Known IP | `"network": {"mode":"tap","netns":true,"mac":"06:…"}` + optional `"cloud_init":{"static_network":true}` | Ephemera dnsmasq; see `ephemera get` |
+| L2 macvtap | `"network": {"mode":"macvtap","parent":"eth0","mac":"06:…"}` | Your L2 / static via cloud-init |
+
+Full examples: [`examples/qemu.json`](examples/qemu.json) (user-mode lab),
+[`examples/guestkit-handoff.json`](examples/guestkit-handoff.json) (post-GuestKit
+netns + known IP), [`examples/macvtap.json`](examples/macvtap.json).
+Networking tests: `sudo ./scripts/test-networking.sh --image /path/to/disk.qcow2`.
+
 ## Table of contents
 
+- [Who does what (customers)](#who-does-what-customers)
 - [Architecture](#architecture)
 - [Project layout](#project-layout)
 - [What is implemented](#what-is-implemented)
@@ -119,14 +174,10 @@ per-*host* node-agent for multi-node deployments) and `ephemera-kube` are both i
 and verified against real multi-host/cluster infrastructure — see "Distributed node-agent"
 and "Kubernetes CRD/operator" below.
 
-This project also depends on the sibling [`guestkit`](../guestkit) project (a
-pure-Rust, qemu-nbd-based disk toolkit) as a path dependency from `ephemera-image`,
-for injecting files into an offline image — see "Build an image" below.
-
-**Suite split:** GuestKit **certifies and repairs** disks (doctor, passport, gate,
-offline plans). Ephemera **runs and manages** the resulting qcow2s (overlay, TAP /
-netns / DHCP, cloud-init, TTL, fleets). Do not re-implement Ephemera networking or
-lifecycle inside GuestKit — hand off after passport verify.
+This project also depends on the sibling [`guestkit`](https://github.com/zyvorai/guestkit)
+project (path dep from `ephemera-image`) for offline image customization — see
+"Build an image" below. For the **customer certify → run** path, see
+[Who does what](#who-does-what-customers) above.
 
 ## What is implemented
 
