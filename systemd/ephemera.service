@@ -8,6 +8,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# /run/netns must exist before ProtectSystem namespaces are applied, or
+# systemd fails start with status 226/NAMESPACE (ReadWritePaths=/run/netns).
+ExecStartPre=/usr/bin/mkdir -p /run/netns /run/ephemera /var/lib/ephemera
 ExecStart=/usr/local/bin/ephemera --config /etc/ephemera.toml serve
 Restart=on-failure
 RestartSec=2
@@ -31,7 +34,8 @@ AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
+# Images may live under /home during lab deploys; read-only is enough.
+ProtectHome=read-only
 # guestkit (disk customization/agent-token injection) needs a scratch mount
 # root under /run or /tmp; PrivateTmp gives it an isolated, writable /tmp
 # without opening up the host's shared one.

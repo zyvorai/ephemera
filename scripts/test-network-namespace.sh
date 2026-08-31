@@ -90,6 +90,9 @@ wait_exec() {
 }
 
 section "Create (QEMU, network.mode=tap, netns=true, agent enabled)"
+# netns DHCP pins the guest address to an explicit MAC (--dhcp-host); without
+# one, prepare() refuses to create the namespace.
+MAC=$(printf '52:54:00:%02x:%02x:%02x' $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256)))
 cat > "${TMP}/vm.json" <<JSON
 {
   "name": "ephemera-netns-test",
@@ -97,7 +100,7 @@ cat > "${TMP}/vm.json" <<JSON
   "image": "${IMAGE}",
   "vcpus": 1,
   "memory_mib": 768,
-  "network": {"mode": "tap", "netns": true},
+  "network": {"mode": "tap", "netns": true, "mac": "${MAC}"},
   "agent": {"enabled": true, "port": 17777},
   "ttl_seconds": 600
 }

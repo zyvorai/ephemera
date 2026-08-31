@@ -85,9 +85,29 @@ Full examples: [`examples/qemu.json`](examples/qemu.json) (user-mode lab),
 netns + known IP), [`examples/macvtap.json`](examples/macvtap.json).
 Networking tests: `sudo ./scripts/test-networking.sh --image /path/to/disk.qcow2`.
 
+### Libvirt / virsh replacement (host-local)
+
+Ephemera is the Zyvor **host-local** replacement for libvirt/virsh lifecycle and
+networking. It is **not** a drop-in for KubeVirt/OpenShift (`virtctl` stays).
+
+| virsh / libvirt | Ephemera |
+|-----------------|----------|
+| `virsh define` + `start` | `ephemera create --spec …` (CoW overlay + boot) |
+| `virsh list --all` | `ephemera list` |
+| `virsh dominfo` / guest IP | `ephemera get <id>` (`guest_ip` when `netns: true`) |
+| `virsh shutdown` / `destroy` | `ephemera delete <id>` (or wait for `ttl_seconds`) |
+| `virsh suspend` / `resume` | `ephemera pause` / `ephemera resume` |
+| `virsh qemu-agent-command` | Prefer GuestKit `guestkit qga`, or `ephemera exec` (vsock agent) |
+| libvirt NAT (`virbr0`) | `network.mode=user`, or `tap` + existing bridge, or `tap`+`netns` |
+
+Offline disk certify/repair stays in **[GuestKit](https://github.com/zyvorai/guestkit)**
+(`doctor`, `passport`, `plan`). Lab-only smoke without Ephemera: `guestkit vm`
+(user-mode only).
+
 ## Table of contents
 
 - [Who does what (customers)](#who-does-what-customers)
+- [Libvirt / virsh replacement (host-local)](#libvirt--virsh-replacement-host-local)
 - [Architecture](#architecture)
 - [Project layout](#project-layout)
 - [What is implemented](#what-is-implemented)
