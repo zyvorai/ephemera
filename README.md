@@ -123,6 +123,11 @@ This project also depends on the sibling [`guestkit`](../guestkit) project (a
 pure-Rust, qemu-nbd-based disk toolkit) as a path dependency from `ephemera-image`,
 for injecting files into an offline image — see "Build an image" below.
 
+**Suite split:** GuestKit **certifies and repairs** disks (doctor, passport, gate,
+offline plans). Ephemera **runs and manages** the resulting qcow2s (overlay, TAP /
+netns / DHCP, cloud-init, TTL, fleets). Do not re-implement Ephemera networking or
+lifecycle inside GuestKit — hand off after passport verify.
+
 ## What is implemented
 
 - Common `VmBackend` Rust trait: launch, pause, resume, graceful shutdown.
