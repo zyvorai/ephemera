@@ -81,6 +81,14 @@ pub fn build_args(req: &CreateVmRequest, ctx: &LaunchContext, virtiofs_sockets: 
         "-m".into(), format!("{}M,slots={},maxmem={}M", req.memory_mib, DEFAULT_MEMORY_HOTPLUG_SLOTS, max_memory_mib),
         "-nodefaults".into(),
         "-display".into(), "none".into(),
+        // `-nodefaults` also drops QEMU's implicit default VGA card, so
+        // without an explicit one here the guest has no graphics device
+        // at all -- VNC is still a valid display *server*, but with
+        // nothing in the guest to render, every frame is solid black
+        // regardless of what's running inside (BIOS splash, GRUB, a
+        // fully booted desktop, all equally invisible). `std` is the
+        // most broadly compatible QEMU VGA model across guest OSes.
+        "-vga".into(), "std".into(),
         // Fixed, well-known path within this VM's own workspace — no port
         // allocation, no collision bookkeeping needed. Consumers (e.g.
         // zyvor-fabric's VNC proxy) derive the same path themselves from
