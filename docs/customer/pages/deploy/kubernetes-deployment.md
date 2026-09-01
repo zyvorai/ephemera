@@ -88,9 +88,9 @@ Customer manuals: [Ephemera](/docs/ephemera-manual) · [Ragnarok](/docs/ragnarok
 
 ## Next steps
 
-- [Admin basics](admin-basics.md)
-- [Configuration](configuration.md)
-- [Use cases](use-cases.md)
+- [Admin basics](../admin/admin-basics.md)
+- [Configuration](../setup/configuration.md)
+- [Use cases](../onboarding/use-cases.md)
 
 ## Operate from the console (UX)
 

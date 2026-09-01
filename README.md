@@ -173,6 +173,7 @@ multi-node architecture:
 ```text
 crates/
 ├── ephemera-core                 domain types, config, VmBackend trait
+├── ephemera-cgroup                cgroup v2 resource control (cpu/memory/io/freezer/pressure/cpuset)
 ├── ephemera-storage               VM-record state persistence
 ├── ephemera-network               TAP/bridge network preparation
 ├── ephemera-image                 image build/clone + cloud-init seed generation
@@ -884,17 +885,22 @@ POST   /v1/vms
 GET    /v1/vms
 GET    /v1/vms/{uuid}
 POST   /v1/vms/{uuid}/start
+POST   /v1/vms/{uuid}/start-from-snapshot
 POST   /v1/vms/{uuid}/stop
 POST   /v1/vms/{uuid}/pause
 POST   /v1/vms/{uuid}/resume
 POST   /v1/vms/{uuid}/resources
+GET    /v1/vms/{uuid}/cpuset
 POST   /v1/vms/{uuid}/freeze
 POST   /v1/vms/{uuid}/thaw
 GET    /v1/vms/{uuid}/frozen
 GET    /v1/vms/{uuid}/stats
 GET    /v1/vms/{uuid}/pressure
 GET    /v1/vms/{uuid}/logs
+GET    /v1/vms/{uuid}/console
 POST   /v1/vms/{uuid}/agent
+POST   /v1/vms/{uuid}/agent/put-file
+POST   /v1/vms/{uuid}/agent/get-file
 DELETE /v1/vms/{uuid}
 POST   /v1/images/build
 GET    /v1/images/catalog
@@ -903,6 +909,8 @@ DELETE /v1/images/catalog/{name}
 POST   /v1/images/catalog/{name}/rename
 POST   /v1/images/catalog/{name}/clone
 POST   /v1/images/catalog/{name}/export
+POST   /v1/images/catalog/{name}/read-only
+POST   /v1/images/catalog/clean
 POST   /v1/pools
 GET    /v1/pools
 GET    /v1/pools/{name}

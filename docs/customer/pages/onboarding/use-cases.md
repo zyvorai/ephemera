@@ -54,7 +54,7 @@ path out at all.
 Build a customized, versioned base image once — package installs,
 hostname, SSH keys, a baked-in agent binary — and reuse it across every VM
 you create from it, instead of provisioning each VM from scratch at boot
-time. See [Building custom OS images](build-image-tutorial.md) for the full
+time. See [Building custom OS images](../images/build-image-tutorial.md) for the full
 walkthrough across Debian/Ubuntu, RHEL-family, and Arch base images.
 
 Pair it with the image catalog (SHA-256 + optional Ed25519 signing) to give
@@ -146,8 +146,8 @@ tests.
 ## Next steps
 
 - [Getting started](getting-started.md)
-- [Building custom OS images](build-image-tutorial.md)
-- [Common workflows](workflows.md)
+- [Building custom OS images](../images/build-image-tutorial.md)
+- [Common workflows](../operations/workflows.md)
 
 ## Operate from the console (UX)
 

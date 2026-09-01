@@ -49,9 +49,9 @@ An optional `[policy]` section caps `max_vcpus`, `max_memory_mib`, `max_disk_gib
 
 ## Next steps
 
-- [Getting started](getting-started.md)
-- [Common workflows](workflows.md)
-- [Admin basics](admin-basics.md)
+- [Getting started](../onboarding/getting-started.md)
+- [Common workflows](../operations/workflows.md)
+- [Admin basics](../admin/admin-basics.md)
 
 ## Operate from the console (UX)
 

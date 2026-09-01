@@ -170,8 +170,8 @@ sudo qemu-nbd -d /dev/nbd0
 
 ## Next steps
 
-- [Common workflows](workflows.md)
-- [Use cases](use-cases.md)
+- [Common workflows](../operations/workflows.md)
+- [Use cases](../onboarding/use-cases.md)
 - [Technical docs](/docs/ephemera)
 
 ## Operate from the console (UX)

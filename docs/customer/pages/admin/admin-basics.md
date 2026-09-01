@@ -19,7 +19,7 @@ Deploy, systemd, ports, host prep, and operations.
 | **Security** | Bearer-token auth/RBAC is opt-in — configure `[[auth.tokens]]` before exposing the REST API beyond localhost; `extra_args` on a create request is an administrator escape hatch, never expose it to untrusted callers |
 | **Support** | [GitHub issues](https://github.com/zyvorai/ephemera/issues) · [Contact Zyvor](/contact) for Enterprise |
 
-See also [Getting started](getting-started.md) and [Configuration](configuration.md).
+See also [Getting started](../onboarding/getting-started.md) and [Configuration](../setup/configuration.md).
 
 ## Operate from the console (UX)
 

@@ -55,15 +55,15 @@ ephemera delete <id>
 
 ## Troubleshooting
 
-- **`create` fails with "base image does not exist"** — the `image` path in the spec must exist on the host running `ephemera`, and (for the `ceph-rbd`/`lvm-thin` storage backends) follow their specific reference format — see [Configuration](configuration.md).
+- **`create` fails with "base image does not exist"** — the `image` path in the spec must exist on the host running `ephemera`, and (for the `ceph-rbd`/`lvm-thin` storage backends) follow their specific reference format — see [Configuration](../setup/configuration.md).
 - **`exec` hangs or fails** — confirm the create request set `"agent": {"enabled": true}` and the guest image actually has `ephemera-guest-agent` installed and running.
 - **`/dev/kvm` missing** — enable virtualization in the host's BIOS/hypervisor, and confirm the current user is in the `kvm` group or run as root.
 
 ## Next steps
 
-- [Configuration](configuration.md)
-- [Common workflows](workflows.md)
-- [Admin basics](admin-basics.md)
+- [Configuration](../setup/configuration.md)
+- [Common workflows](../operations/workflows.md)
+- [Admin basics](../admin/admin-basics.md)
 
 ## Operate from the console (UX)
 
