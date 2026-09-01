@@ -30,8 +30,14 @@ KillMode=process
 # needs raw sockets for its own DHCP internals -- found live, one at a
 # time: first "Permission denied" binding :67, then (after adding
 # NET_BIND_SERVICE) "process is missing required capability NET_RAW".
-AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+# CAP_SYS_CHROOT: image customization (`POST /v1/images/build`'s `packages`/
+# `commands`/`enable_services`) execs inside the mounted guest via
+# `guestkit::Guestfs::command`, which chroots into it -- found live,
+# "chroot: cannot change root directory: Operation not permitted" baking
+# ephemera-guest-agent into a base image (CAP_SYS_ADMIN alone covers the
+# NBD/mount side of guestkit but not the chroot(2) syscall itself).
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SYS_CHROOT
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SYS_CHROOT
 NoNewPrivileges=true
 ProtectSystem=strict
 # Images may live under /home during lab deploys; read-only is enough.
