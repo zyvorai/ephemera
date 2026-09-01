@@ -10,7 +10,7 @@ use ephemera_core::{config::Config, model::BackendKind, process::run_checked};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fs, path::{Path, PathBuf}};
+use std::{collections::HashMap, fs, path::{Path, PathBuf}};
 use tokio::{fs as async_fs, io::AsyncWriteExt};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,6 +121,21 @@ async fn customize_image(image: PathBuf, req: BuildImageRequest) -> Result<()> {
         .context("guestkit worker thread panicked")?
 }
 
+/// Orders fstab mountpoints shallowest-first (`/` before `/boot` before
+/// `/boot/efi`) so each mount's target directory already exists under an
+/// already-mounted parent by the time it's attempted. `HashMap` iteration
+/// order is arbitrary, and mounting a nested mountpoint before its parent
+/// is mounted read-write fails outright: found live against a stock
+/// Ubuntu 24.04 image, where mounting `LABEL=UEFI` at `/boot/efi` before
+/// `/` failed `mkdir`ing `/boot/efi` (never pre-created in that image)
+/// against a root still mounted read-only from `inspect_get_mountpoints`'s
+/// own fstab-reading probe.
+fn depth_ordered_mounts(mounts: HashMap<String, String>) -> Vec<(String, String)> {
+    let mut mounts: Vec<(String, String)> = mounts.into_iter().collect();
+    mounts.sort_by_key(|(mountpoint, _)| mountpoint.split('/').filter(|c| !c.is_empty()).count());
+    mounts
+}
+
 fn customize_image_blocking(image: &Path, req: &BuildImageRequest) -> Result<()> {
     use guestkit::Guestfs;
 
@@ -131,7 +146,7 @@ fn customize_image_blocking(image: &Path, req: &BuildImageRequest) -> Result<()>
     let roots = g.inspect_os().context("inspecting guest OS")?;
     let root = roots.first().context("no operating system found in image")?.clone();
     let mounts = g.inspect_get_mountpoints(&root).context("getting mountpoints")?;
-    for (mountpoint, device) in &mounts {
+    for (mountpoint, device) in &depth_ordered_mounts(mounts) {
         g.mount(device, mountpoint)
             .with_context(|| format!("mounting {device} at {mountpoint}"))?;
     }
@@ -345,7 +360,7 @@ fn inject_guest_agent_token_blocking(disk: &Path, token: &str) -> Result<()> {
     let roots = g.inspect_os().context("inspecting guest OS")?;
     let root = roots.first().context("no operating system found in image")?;
     let mounts = g.inspect_get_mountpoints(root).context("getting mountpoints")?;
-    for (mountpoint, device) in &mounts {
+    for (mountpoint, device) in &depth_ordered_mounts(mounts) {
         g.mount(device, mountpoint)
             .with_context(|| format!("mounting {device} at {mountpoint}"))?;
     }
