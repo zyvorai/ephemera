@@ -1,22 +1,22 @@
 # Copyright 2026 Zyvor
 # SPDX-License-Identifier: Apache-2.0
 #
-# Builds one image with two entrypoints: `ephemera serve` (the VMM control
-# plane REST API) and `ephemera-kube` (the DisposableVm operator). They run
+# Builds one image with two entrypoints: `fluxvm serve` (the VMM control
+# plane REST API) and `fluxvm-kube` (the DisposableVm operator). They run
 # as two containers in the same DaemonSet pod — see deploy/k8s/daemonset.yaml
 # — sharing this image, selected via each container's `command:`.
 #
-# ephemera-image depends on the sibling `guestkit` repo via a relative path
-# (`../../../guestkit` from crates/ephemera-image — see its Cargo.toml), so
+# fluxvm-image depends on the sibling `guestkit` repo via a relative path
+# (`../../../guestkit` from crates/fluxvm-image — see its Cargo.toml), so
 # this build needs guestkit supplied as an additional build context, the same
 # way .github/workflows/ci.yml checks it out as a sibling directory. Build
 # with BuildKit's named build-context support (Docker >= 20.10 / buildx):
 #
 #   docker buildx build \
 #     --build-context guestkit=../guestkit \
-#     -t ephemera:latest .
+#     -t fluxvm:latest .
 #
-# (run from the Ephemera repo root, with guestkit checked out as its usual
+# (run from the FluxVM repo root, with guestkit checked out as its usual
 # sibling at ../guestkit — matching every other path in this repo that
 # assumes that layout).
 
@@ -31,11 +31,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
-COPY . ./ephemera
+COPY . ./fluxvm
 COPY --from=guestkit . ./guestkit
 
-WORKDIR /build/ephemera
-RUN cargo build --locked --release -p ephemera-cli -p ephemera-kube
+WORKDIR /build/fluxvm
+RUN cargo build --locked --release -p fluxvm-cli -p fluxvm-kube -p fluxvm-hypervisor
 
 FROM docker.io/library/debian:bookworm-slim AS runtime
 
@@ -55,7 +55,8 @@ RUN bash /tmp/install-cloud-hypervisor.sh \
     && bash /tmp/install-firecracker.sh \
     && rm -f /tmp/install-cloud-hypervisor.sh /tmp/install-firecracker.sh
 
-COPY --from=builder /build/ephemera/target/release/ephemera /usr/local/bin/ephemera
-COPY --from=builder /build/ephemera/target/release/ephemera-kube /usr/local/bin/ephemera-kube
+COPY --from=builder /build/fluxvm/target/release/fluxvm /usr/local/bin/fluxvm
+COPY --from=builder /build/fluxvm/target/release/fluxvm-kube /usr/local/bin/fluxvm-kube
+COPY --from=builder /build/fluxvm/target/release/fluxvm-hypervisor /usr/local/bin/fluxvm-hypervisor
 
 ENTRYPOINT []

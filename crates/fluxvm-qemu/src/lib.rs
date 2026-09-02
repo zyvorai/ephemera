@@ -1,0 +1,425 @@
+// Copyright 2026 Zyvor
+// SPDX-License-Identifier: Apache-2.0
+
+mod qmp;
+
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use fluxvm_core::{
+    backend::{path_arg, LaunchContext, LaunchResult, VmBackend},
+    config::Config,
+    model::{BackendKind, CreateVmRequest, NetworkSpec, VmRecord},
+    process::spawn_logged,
+};
+use std::path::PathBuf;
+use std::time::Duration;
+
+const QMP_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long to wait for each `virtiofsd` to create its listening socket
+/// before giving up and launching QEMU anyway (which would then fail to
+/// connect with a clear error, rather than this hanging indefinitely).
+const VIRTIOFSD_SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
+/// DIMM slots reserved for memory hotplug when `req.max_memory_mib` isn't
+/// set. Each `device_add pc-dimm` (one per hotplug-memory call) consumes
+/// one slot regardless of its size, so this caps hotplug *calls*, not
+/// total addable memory (that's bounded by `maxmem` - `memory_mib`
+/// instead) -- 4 is plenty for the incremental hot-adds this is meant for
+/// without reserving excessive address space for VMs that never use it.
+const DEFAULT_MEMORY_HOTPLUG_SLOTS: u32 = 4;
+/// Upper bound this backend will ever pass to `-smp maxcpus=`. Comfortably
+/// under QEMU's default limit (255 for i440fx/q35 without extra config)
+/// while leaving room for `req.vcpus` itself to approach it.
+const MAX_VCPUS_CEILING: u8 = 254;
+/// Empty `pcie-root-port` slots reserved at boot for device hotplug (NIC,
+/// extra disks). q35's root complex (`pcie.0`) itself refuses `device_add`
+/// outright -- found live: "Bus 'pcie.0' does not support hotplugging" --
+/// PCIe hotplug only works on a dedicated root port declared up front.
+/// Each port holds exactly one device, so this also bounds how many
+/// hotplug device_adds a VM can receive before needing a restart. IDs
+/// follow the fixed, predictable `hotplug-pcie-0..N` convention (mirrored
+/// independently in zyvor-fabricd's hotplug handlers, which target one via
+/// `device_add`'s `bus` field, trying each until one's free -- the same
+/// out-of-process REST relationship as the `vnc.sock` path convention
+/// above, not a Rust dependency, so the convention can't be shared as code).
+const HOTPLUG_PCIE_PORTS: u8 = 4;
+
+pub struct QemuBackend;
+
+/// One `virtiofsd` instance's device-facing identity, resolved before QEMU
+/// itself is built/launched — `(tag, socket_path)`, index-ordered with
+/// `req.shared_folders` (`tag` is always `"fs{index}"`).
+pub type VirtiofsSocket = (String, PathBuf);
+
+pub fn build_args(req: &CreateVmRequest, ctx: &LaunchContext, virtiofs_sockets: &[VirtiofsSocket]) -> Result<Vec<String>> {
+    // A `StorageBackend::Nbd` disk isn't opened as a local file at all — it's
+    // attached via QEMU's native nbd: block client against the qemu-nbd
+    // export this VM owns. Every other storage backend (including the
+    // Default qcow2 overlay) opens `ctx.disk` directly, just with a format
+    // that varies by backend (see `fluxvm_image::storage::disk_format`).
+    let disk_drive = match &ctx.nbd_export {
+        Some(socket) => format!("file=nbd:unix:{},if=virtio,format=raw", socket.display()),
+        None => format!("file={},if=virtio,format={},cache=none,aio=native", path_arg(&ctx.disk), ctx.disk_format),
+    };
+    // Reserve hotplug headroom by default so `device_add` (CPU) and
+    // `device_add pc-dimm` (memory) have somewhere to land -- found live:
+    // with a bare `-smp N`/`-m N`, `query-hotpluggable-cpus` reports zero
+    // unrealized slots (hotplug-cpu silently added 0 vCPUs, HTTP 200) and
+    // DIMM hotplug fails outright ("no slots where allocated"). Declaring
+    // extra `maxcpus`/`maxmem` address space here doesn't reserve real
+    // RAM or spin up real vCPU threads up front -- only `req.vcpus` and
+    // `req.memory_mib` are actually allocated at boot -- so this is cheap
+    // even for VMs that never hotplug.
+    let max_vcpus = req.max_vcpus.unwrap_or_else(|| req.vcpus.saturating_mul(2)).max(req.vcpus).min(MAX_VCPUS_CEILING);
+    let max_memory_mib = req
+        .max_memory_mib
+        .unwrap_or_else(|| req.memory_mib.saturating_mul(2).max(req.memory_mib.saturating_add(2048)));
+    let mut a = vec![
+        "-enable-kvm".into(),
+        "-machine".into(), "q35,accel=kvm".into(),
+        "-cpu".into(), "host".into(),
+        "-smp".into(), format!("cpus={},maxcpus={}", req.vcpus, max_vcpus),
+        "-m".into(), format!("{}M,slots={},maxmem={}M", req.memory_mib, DEFAULT_MEMORY_HOTPLUG_SLOTS, max_memory_mib),
+        "-nodefaults".into(),
+        "-display".into(), "none".into(),
+        // `-nodefaults` also drops QEMU's implicit default VGA card, so
+        // without an explicit one here the guest has no graphics device
+        // at all -- VNC is still a valid display *server*, but with
+        // nothing in the guest to render, every frame is solid black
+        // regardless of what's running inside (BIOS splash, GRUB, a
+        // fully booted desktop, all equally invisible). `std` is the
+        // most broadly compatible QEMU VGA model across guest OSes.
+        "-vga".into(), "std".into(),
+        // Fixed, well-known path within this VM's own workspace — no port
+        // allocation, no collision bookkeeping needed. Consumers (e.g.
+        // zyvor-fabric's VNC proxy) derive the same path themselves from
+        // `VmRecord::workspace`, already exposed via the REST API.
+        "-vnc".into(), format!("unix:{}", path_arg(&ctx.workspace.join("vnc.sock"))),
+        "-serial".into(), "stdio".into(),
+        "-drive".into(), disk_drive,
+    ];
+    for i in 0..HOTPLUG_PCIE_PORTS {
+        a.extend([
+            "-device".into(),
+            format!("pcie-root-port,id=hotplug-pcie-{i},bus=pcie.0,chassis={},slot={i}", i + 1),
+        ]);
+    }
+    // A virtio-scsi controller for disk hotplug with bus="scsi" -- unlike
+    // the PCIe root ports above (one device per port), a single
+    // virtio-scsi-pci controller can host many hot-added scsi-hd devices
+    // on its own "scsi0.0" bus, so one is enough. q35 has no built-in
+    // SCSI controller (unlike IDE -- see zyvor-fabricd's hotplug_disk,
+    // which targets the ich9-ahci controller's existing empty ide.0..5
+    // ports directly, no boot-time device needed for that path).
+    a.extend(["-device".into(), "virtio-scsi-pci,id=scsi0,bus=pcie.0".into()]);
+
+    if let Some(seed) = &ctx.seed_disk {
+        a.extend(["-drive".into(), format!("file={},if=virtio,format=raw,readonly=on", path_arg(seed))]);
+    }
+
+    // virtiofs requires the guest's RAM to be backed by shared memory, not
+    // QEMU's default anonymous allocation — `vhost-user-fs-pci` otherwise
+    // fails to attach. `-m` above still sets the *size*; this object is
+    // what makes the *backing* shareable with the virtiofsd process(es).
+    if !virtiofs_sockets.is_empty() {
+        a.extend(["-object".into(), format!("memory-backend-memfd,id=mem,size={}M,share=on", req.memory_mib)]);
+        a.extend(["-numa".into(), "node,memdev=mem".into()]);
+    }
+    for (i, (tag, socket)) in virtiofs_sockets.iter().enumerate() {
+        a.extend(["-chardev".into(), format!("socket,id=vfsock{i},path={}", path_arg(socket))]);
+        a.extend(["-device".into(), format!("vhost-user-fs-pci,queue-size=1024,chardev=vfsock{i},tag={tag}")]);
+    }
+
+    match &ctx.network.spec {
+        NetworkSpec::None => {}
+        NetworkSpec::User { forwards } => {
+            let mut netdev = "user,id=net0".to_string();
+            // Bind to all interfaces, not just loopback: these forwards
+            // exist specifically so a caller outside the host (e.g. SSH
+            // from a laptop) can reach the guest -- 127.0.0.1 would make
+            // every exposed port reachable only from processes already on
+            // the host itself, defeating the feature entirely.
+            for f in forwards {
+                netdev.push_str(&format!(",hostfwd={}:0.0.0.0:{}-:{}", f.protocol, f.host_port, f.guest_port));
+            }
+            a.extend(["-netdev".into(), netdev, "-device".into(), "virtio-net-pci,netdev=net0".into()]);
+        }
+        NetworkSpec::Tap { tap_name, mac, .. } => {
+            if let Some(tap) = tap_name {
+                a.extend(["-netdev".into(), format!("tap,id=net0,ifname={tap},script=no,downscript=no")]);
+                let dev = mac.as_ref().map(|m| format!("virtio-net-pci,netdev=net0,mac={m}"))
+                    .unwrap_or_else(|| "virtio-net-pci,netdev=net0".into());
+                a.extend(["-device".into(), dev]);
+            }
+        }
+        NetworkSpec::Macvtap { mac, .. } => {
+            let fd = ctx.network.macvtap_fd.context("macvtap network was not prepared")?;
+            a.extend(["-netdev".into(), format!("tap,id=net0,fd={fd}")]);
+            let dev = mac.as_ref().map(|m| format!("virtio-net-pci,netdev=net0,mac={m}"))
+                .unwrap_or_else(|| "virtio-net-pci,netdev=net0".into());
+            a.extend(["-device".into(), dev]);
+        }
+    }
+
+    if req.agent.as_ref().is_some_and(|a| a.enabled) {
+        if let Some(cid) = ctx.guest_cid {
+            a.extend(["-device".into(), format!("vhost-vsock-pci,guest-cid={cid}")]);
+        }
+    }
+
+    if let Some(kernel) = &req.kernel {
+        a.extend(["-kernel".into(), path_arg(kernel)]);
+        if let Some(initrd) = &req.initrd { a.extend(["-initrd".into(), path_arg(initrd)]); }
+        if let Some(kargs) = &req.kernel_args { a.extend(["-append".into(), kargs.clone()]); }
+    }
+
+    let qmp = ctx.workspace.join("qmp.sock");
+    a.extend(["-qmp".into(), format!("unix:{},server=on,wait=off", qmp.display())]);
+    a.extend(req.extra_args.clone());
+    // Restores CPU/memory/device state from an existing internal snapshot
+    // on this VM's own disk instead of a normal cold boot -- see
+    // CreateVmRequest.loadvm_tag's doc comment for why this is a one-shot
+    // launch override, never persisted onto the stored request.
+    if let Some(tag) = &req.loadvm_tag {
+        a.extend(["-loadvm".into(), tag.clone()]);
+    }
+    Ok(a)
+}
+
+/// Spawns one `virtiofsd` per `req.shared_folders` entry, in order, each
+/// listening on its own socket under `ctx.workspace`. On any failure,
+/// already-spawned instances from this call are killed before returning —
+/// callers never have to reconcile a partial set themselves.
+async fn spawn_virtiofsd_instances(
+    cfg: &Config,
+    req: &CreateVmRequest,
+    ctx: &LaunchContext,
+) -> Result<(Vec<u32>, Vec<VirtiofsSocket>)> {
+    let mut pids = Vec::new();
+    let mut sockets = Vec::new();
+    for (i, share) in req.shared_folders.iter().enumerate() {
+        let socket = ctx.workspace.join(format!("virtiofs-{i}.sock"));
+        let tag = format!("fs{i}");
+        let mut args = vec![
+            "--socket-path".to_string(), path_arg(&socket),
+            "--shared-dir".to_string(), path_arg(&share.host_path),
+        ];
+        if share.read_only {
+            args.push("--readonly".to_string());
+        }
+        let log = ctx.workspace.join(format!("virtiofsd-{i}.log"));
+        let spawn_result = spawn_logged(&cfg.virtiofsd_binary, &args, &log)
+            .await
+            .with_context(|| format!("spawning virtiofsd for shared_folders[{i}] ({})", share.host_path.display()));
+        let child = match spawn_result {
+            Ok(c) => c,
+            Err(e) => {
+                kill_pids(&pids);
+                return Err(e);
+            }
+        };
+        let Some(pid) = child.id() else {
+            kill_pids(&pids);
+            anyhow::bail!("virtiofsd for shared_folders[{i}] exited before PID was available");
+        };
+        // virtiofsd creates its listening socket asynchronously after
+        // startup; QEMU connects as the vhost-user client and needs it to
+        // already exist. Not finding it within the timeout isn't fatal
+        // here — QEMU will fail to connect with its own clear error, which
+        // beats hanging this launch indefinitely on a stuck virtiofsd.
+        let deadline = tokio::time::Instant::now() + VIRTIOFSD_SOCKET_TIMEOUT;
+        while !socket.exists() && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        pids.push(pid);
+        sockets.push((tag, socket));
+    }
+    Ok((pids, sockets))
+}
+
+fn kill_pids(pids: &[u32]) {
+    for pid in pids {
+        unsafe {
+            libc::kill(*pid as libc::pid_t, libc::SIGKILL);
+        }
+    }
+}
+
+#[async_trait]
+impl VmBackend for QemuBackend {
+    fn kind(&self) -> BackendKind { BackendKind::Qemu }
+
+    async fn launch(&self, cfg: &Config, req: &CreateVmRequest, ctx: &LaunchContext) -> Result<LaunchResult> {
+        let (virtiofsd_pids, virtiofs_sockets) = match spawn_virtiofsd_instances(cfg, req, ctx).await {
+            Ok(v) => v,
+            Err(e) => {
+                if let Some(fd) = ctx.network.macvtap_fd {
+                    fluxvm_core::process::close_fd(fd);
+                }
+                return Err(e);
+            }
+        };
+
+        let args = build_args(req, ctx, &virtiofs_sockets)?;
+        let (program, args) = fluxvm_core::process::netns_wrap(ctx.network.netns.as_deref(), &cfg.qemu_binary, &args);
+        let spawned = spawn_logged(&program, &args, &ctx.log_path).await;
+        // The child inherits the macvtap fd across exec (or spawn failed and
+        // there's nothing to inherit); either way the parent's copy is done.
+        if let Some(fd) = ctx.network.macvtap_fd {
+            fluxvm_core::process::close_fd(fd);
+        }
+        let child = match spawned {
+            Ok(c) => c,
+            Err(e) => {
+                kill_pids(&virtiofsd_pids);
+                return Err(e);
+            }
+        };
+        let Some(pid) = child.id() else {
+            kill_pids(&virtiofsd_pids);
+            anyhow::bail!("QEMU exited before PID was available");
+        };
+        Ok(LaunchResult { pid, control_socket: Some(ctx.workspace.join("qmp.sock")), jail_path: None, vsock_socket: None, virtiofsd_pids })
+    }
+
+    async fn pause(&self, _cfg: &Config, vm: &VmRecord) -> Result<()> {
+        qmp::execute(&vm.workspace.join("qmp.sock"), "stop", None, QMP_TIMEOUT).await?;
+        Ok(())
+    }
+
+    async fn resume(&self, _cfg: &Config, vm: &VmRecord) -> Result<()> {
+        qmp::execute(&vm.workspace.join("qmp.sock"), "cont", None, QMP_TIMEOUT).await?;
+        Ok(())
+    }
+
+    async fn graceful_shutdown(&self, _cfg: &Config, vm: &VmRecord) -> Result<()> {
+        qmp::execute(&vm.workspace.join("qmp.sock"), "system_powerdown", None, QMP_TIMEOUT).await?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fluxvm_core::backend::PreparedNetwork;
+    use fluxvm_core::model::NetworkSpec;
+
+    fn req(memory_mib: u64) -> CreateVmRequest {
+        CreateVmRequest {
+            name: "fixture".into(),
+            backend: BackendKind::Qemu,
+            image: "/tmp/base.qcow2".into(),
+            vcpus: 1,
+            memory_mib,
+            max_vcpus: None,
+            max_memory_mib: None,
+            loadvm_tag: None,
+            disk_size_gib: None,
+            kernel: None,
+            initrd: None,
+            firmware: None,
+            kernel_args: None,
+            network: NetworkSpec::None,
+            cloud_init: None,
+            ttl_seconds: None,
+            extra_args: vec![],
+            agent: None,
+            storage: fluxvm_core::model::StorageBackend::Default,
+            shared_folders: vec![],
+        }
+    }
+
+    fn ctx() -> LaunchContext {
+        LaunchContext {
+            id: uuid::Uuid::nil(),
+            workspace: "/tmp/eph-fixture".into(),
+            disk: "/tmp/eph-fixture/root.qcow2".into(),
+            seed_disk: None,
+            log_path: "/tmp/eph-fixture/console.log".into(),
+            network: PreparedNetwork {
+                spec: NetworkSpec::None, tap_name: None, macvtap_fd: None, netns: None,
+                dhcp_leasefile: None, guest_ip: None, guest_cidr: None, gateway: None,
+            },
+            guest_cid: None,
+            vsock_socket: None,
+            disk_format: "qcow2".into(),
+            nbd_export: None,
+        }
+    }
+
+    #[test]
+    fn no_shares_means_no_virtiofs_args() {
+        let args = build_args(&req(2048), &ctx(), &[]).unwrap();
+        assert!(!args.iter().any(|a| a.contains("memory-backend-memfd")));
+        assert!(!args.iter().any(|a| a.contains("vhost-user-fs-pci")));
+        assert!(args.iter().any(|a| a.starts_with("2048M,slots=")));
+    }
+
+    #[test]
+    fn reserves_hotpluggable_pcie_root_ports() {
+        let args = build_args(&req(2048), &ctx(), &[]).unwrap();
+        for i in 0..HOTPLUG_PCIE_PORTS {
+            assert!(
+                args.iter().any(|a| a.contains(&format!("pcie-root-port,id=hotplug-pcie-{i},"))),
+                "missing hotplug-pcie-{i} root port in {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn adds_a_virtio_scsi_controller_for_scsi_hotplug() {
+        let args = build_args(&req(2048), &ctx(), &[]).unwrap();
+        assert!(args.iter().any(|a| a.starts_with("virtio-scsi-pci,id=scsi0")));
+    }
+
+    #[test]
+    fn no_loadvm_flag_when_tag_unset() {
+        let args = build_args(&req(2048), &ctx(), &[]).unwrap();
+        assert!(!args.iter().any(|a| a == "-loadvm"));
+    }
+
+    #[test]
+    fn appends_loadvm_when_tag_set() {
+        let mut r = req(2048);
+        r.loadvm_tag = Some("hibernate-20260101".into());
+        let args = build_args(&r, &ctx(), &[]).unwrap();
+        let idx = args.iter().position(|a| a == "-loadvm").expect("missing -loadvm flag");
+        assert_eq!(args[idx + 1], "hibernate-20260101");
+    }
+
+    #[test]
+    fn memory_and_cpu_hotplug_headroom_defaults_when_unset() {
+        let args = build_args(&req(2048), &ctx(), &[]).unwrap();
+        let smp = args.iter().position(|a| a == "-smp").map(|i| &args[i + 1]).unwrap();
+        assert_eq!(smp, "cpus=1,maxcpus=2");
+        let m = args.iter().position(|a| a == "-m").map(|i| &args[i + 1]).unwrap();
+        assert_eq!(m, "2048M,slots=4,maxmem=4096M");
+    }
+
+    #[test]
+    fn memory_and_cpu_hotplug_headroom_respects_explicit_request() {
+        let mut r = req(1024);
+        r.vcpus = 4;
+        r.max_vcpus = Some(8);
+        r.max_memory_mib = Some(4096);
+        let args = build_args(&r, &ctx(), &[]).unwrap();
+        let smp = args.iter().position(|a| a == "-smp").map(|i| &args[i + 1]).unwrap();
+        assert_eq!(smp, "cpus=4,maxcpus=8");
+        let m = args.iter().position(|a| a == "-m").map(|i| &args[i + 1]).unwrap();
+        assert_eq!(m, "1024M,slots=4,maxmem=4096M");
+    }
+
+    #[test]
+    fn shares_add_shared_memory_backend_and_one_device_per_share() {
+        let sockets: Vec<VirtiofsSocket> = vec![
+            ("fs0".to_string(), "/tmp/eph-fixture/virtiofs-0.sock".into()),
+            ("fs1".to_string(), "/tmp/eph-fixture/virtiofs-1.sock".into()),
+        ];
+        let args = build_args(&req(4096), &ctx(), &sockets).unwrap();
+        let joined = args.join(" ");
+        assert!(joined.contains("memory-backend-memfd,id=mem,size=4096M,share=on"));
+        assert!(joined.contains("numa node,memdev=mem"));
+        assert!(joined.contains("chardev=vfsock0,tag=fs0"));
+        assert!(joined.contains("chardev=vfsock1,tag=fs1"));
+        assert_eq!(args.iter().filter(|a| a.as_str() == "vhost-user-fs-pci,queue-size=1024,chardev=vfsock0,tag=fs0").count(), 1);
+    }
+}

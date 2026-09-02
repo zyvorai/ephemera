@@ -1,14 +1,14 @@
-# Using Ephemera (CLI & API)
+# Using FluxVM (CLI & API)
 
-Ephemera is primarily a **CLI + REST** control plane (no first-party web console). Day-to-day work uses `ephemera` on the host, or the HTTP API the same binary serves.
+FluxVM is primarily a **CLI + REST** control plane (no first-party web console). Day-to-day work uses `fluxvm` on the host, or the HTTP API the same binary serves.
 
 ## CLI essentials
 
 ```bash
-ephemera create --spec examples/qemu.json
-ephemera list
-ephemera exec <id> -- echo hello
-ephemera delete <id>
+fluxvm create --spec examples/qemu.json
+fluxvm list
+fluxvm exec <id> -- echo hello
+fluxvm delete <id>
 ```
 
 ## REST surface

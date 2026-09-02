@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Install Ephemera and boot your first disposable VM.
+Install FluxVM and boot your first disposable VM.
 
 ## How to get there
 
@@ -11,7 +11,7 @@ Install Ephemera and boot your first disposable VM.
 
 ## Guide
 
-Ephemera is a Rust control plane for disposable VMs — it needs a Linux x86_64 host with `/dev/kvm` available, and at least one of `qemu-system-x86_64`, Cloud Hypervisor, or Firecracker installed.
+FluxVM is a Rust control plane for disposable VMs — it needs a Linux x86_64 host with `/dev/kvm` available, and at least one of `qemu-system-x86_64`, Cloud Hypervisor, or Firecracker installed.
 
 ## Prerequisites
 
@@ -23,8 +23,8 @@ Ephemera is a Rust control plane for disposable VMs — it needs a Linux x86_64 
 
 ```bash
 cargo build --release
-sudo install -m 0755 target/release/ephemera /usr/local/bin/ephemera
-sudo install -m 0644 config.example.toml /etc/ephemera.toml
+sudo install -m 0755 target/release/fluxvm /usr/local/bin/fluxvm
+sudo install -m 0644 config.example.toml /etc/fluxvm.toml
 ```
 
 A one-command host bootstrap script (`scripts/bootstrap-host.sh`) installs the system packages, Cloud Hypervisor, and Firecracker for you; `scripts/deploy-remote.sh` does the same over SSH to a remote host.
@@ -32,7 +32,7 @@ A one-command host bootstrap script (`scripts/bootstrap-host.sh`) installs the s
 ## 2. Create your first VM
 
 ```bash
-ephemera create --spec examples/qemu.json
+fluxvm create --spec examples/qemu.json
 ```
 
 The response is the VM's full record — id, status, disk path, PID. It boots from a disposable copy-on-write overlay of the base image named in the spec, so the base image itself is never modified.
@@ -40,23 +40,23 @@ The response is the VM's full record — id, status, disk path, PID. It boots fr
 ## 3. Run something inside it
 
 ```bash
-ephemera exec <id> -- echo hello
+fluxvm exec <id> -- echo hello
 ```
 
 This runs over the vsock guest agent — no SSH, no network path required at all, as long as the guest image has the agent installed and `agent.enabled: true` was set on the create request.
 
 ## 4. Let it clean up on its own
 
-Set `ttl_seconds` on the create request and Ephemera's TTL reaper deletes the VM automatically once it expires — or delete it yourself:
+Set `ttl_seconds` on the create request and FluxVM's TTL reaper deletes the VM automatically once it expires — or delete it yourself:
 
 ```bash
-ephemera delete <id>
+fluxvm delete <id>
 ```
 
 ## Troubleshooting
 
-- **`create` fails with "base image does not exist"** — the `image` path in the spec must exist on the host running `ephemera`, and (for the `ceph-rbd`/`lvm-thin` storage backends) follow their specific reference format — see [Configuration](../setup/configuration.md).
-- **`exec` hangs or fails** — confirm the create request set `"agent": {"enabled": true}` and the guest image actually has `ephemera-guest-agent` installed and running.
+- **`create` fails with "base image does not exist"** — the `image` path in the spec must exist on the host running `fluxvm`, and (for the `ceph-rbd`/`lvm-thin` storage backends) follow their specific reference format — see [Configuration](../setup/configuration.md).
+- **`exec` hangs or fails** — confirm the create request set `"agent": {"enabled": true}` and the guest image actually has `fluxvm-guest-agent` installed and running.
 - **`/dev/kvm` missing** — enable virtualization in the host's BIOS/hypervisor, and confirm the current user is in the `kvm` group or run as root.
 
 ## Next steps

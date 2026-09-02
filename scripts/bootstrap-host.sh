@@ -2,7 +2,7 @@
 # Copyright 2026 Zyvor
 # SPDX-License-Identifier: Apache-2.0
 
-# Prepare a fresh Linux host to run Zyvor Ephemera: install QEMU/cloud-init
+# Prepare a fresh Linux host to run Zyvor FluxVM: install QEMU/cloud-init
 # tooling via the system package manager, load the nbd kernel module (used by
 # guestkit for image customization), install Cloud Hypervisor and Firecracker
 # from upstream releases, create the state directories and an optional
@@ -47,7 +47,7 @@ else
 fi
 ok "system packages ready"
 
-# guestkit (used by `ephemera build-image`'s copy_in) mounts qcow2/raw images
+# guestkit (used by `fluxvm build-image`'s copy_in) mounts qcow2/raw images
 # via qemu-nbd, which needs the nbd kernel module loaded.
 $SUDO modprobe nbd max_part=16 2>/dev/null || warn "modprobe nbd failed — image copy_in will not work until the nbd module is loaded"
 ok "nbd kernel module loaded"
@@ -62,9 +62,9 @@ if [ "${SKIP_BRIDGE:-0}" != "1" ]; then
     fi
 fi
 
-$SUDO install -d -m 0755 /var/lib/ephemera/{images,kernels,instances,downloads}
-$SUDO install -d -m 0755 /run/ephemera
-ok "state directories ready under /var/lib/ephemera"
+$SUDO install -d -m 0755 /var/lib/fluxvm/{images,kernels,instances,downloads}
+$SUDO install -d -m 0755 /run/fluxvm
+ok "state directories ready under /var/lib/fluxvm"
 
 if [ "${SKIP_CLOUD_HYPERVISOR:-0}" != "1" ]; then
     info "Installing Cloud Hypervisor..."

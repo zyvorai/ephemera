@@ -1,13 +1,13 @@
 # Use cases
 
-Ephemera is a disposable-VM control plane: create a short-lived, isolated
+FluxVM is a disposable-VM control plane: create a short-lived, isolated
 virtual machine backed by QEMU/KVM, Cloud Hypervisor, or Firecracker, use it,
 and let a TTL reaper clean it up. This doc walks through the use cases that
 map directly onto what's actually implemented (see the main
 [README](../README.md#what-is-implemented) for the full feature list) —
 nothing here is aspirational.
 
-## Ephemeral CI/CD build and test runners
+## FluxVMl CI/CD build and test runners
 
 Spin up a real VM per job, run the job inside it over vsock `exec` (no SSH,
 no network path needed at all), and let `ttl_seconds` guarantee cleanup even
@@ -18,7 +18,7 @@ cat > ci-job.json <<'JSON'
 {
   "name": "ci-job-4821",
   "backend": "firecracker",
-  "image": "/var/lib/ephemera/images/ci-runner.raw",
+  "image": "/var/lib/fluxvm/images/ci-runner.raw",
   "vcpus": 2,
   "memory_mib": 2048,
   "network": {"mode": "none"},
@@ -27,8 +27,8 @@ cat > ci-job.json <<'JSON'
 }
 JSON
 
-id=$(ephemera create --spec ci-job.json | jq -r .id)
-ephemera exec "$id" -- ./run-tests.sh
+id=$(fluxvm create --spec ci-job.json | jq -r .id)
+fluxvm exec "$id" -- ./run-tests.sh
 ```
 
 Firecracker's jailer (chroot + uid/gid drop, see "Firecracker jailer" in the
@@ -50,14 +50,14 @@ cat > golden-image.json <<'JSON'
 {
   "source": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
   "sha256": "...",
-  "output": "/var/lib/ephemera/images/team-golden-v12.qcow2",
+  "output": "/var/lib/fluxvm/images/team-golden-v12.qcow2",
   "packages": ["docker.io", "jq", "qemu-guest-agent"],
   "commands": ["systemctl enable docker"],
   "enable_services": ["qemu-guest-agent"]
 }
 JSON
 
-sudo ephemera build-image --spec golden-image.json
+sudo fluxvm build-image --spec golden-image.json
 ```
 
 See [`docs/build-image-tutorials.md`](build-image-tutorials.md) for the same
@@ -72,23 +72,23 @@ signed entry.
 
 For teams already running Kubernetes who want a real VM (not a container)
 for a specific workload — untrusted code, a kernel-dependent test, a legacy
-binary — the `DisposableVm` CRD plus the node-local `ephemera-kube` operator
+binary — the `DisposableVm` CRD plus the node-local `fluxvm-kube` operator
 lets a VM be requested the same way any other Kubernetes resource is.
 
 **Product path:** [Ragnarok](https://zyvor.dev/docs/ragnarok) creates those CRs from its
-Ephemera Hub (with OIDC/SSO and RBAC). Install Ephemera first, then Ragnarok — see
+FluxVM Hub (with OIDC/SSO and RBAC). Install FluxVM first, then Ragnarok — see
 [docs/ragnarok.md](ragnarok.md).
 
 
 ```yaml
-apiVersion: ephemera.zyvor.io/v1
+apiVersion: fluxvm.zyvor.io/v1
 kind: DisposableVm
 metadata:
   name: untrusted-job-7
 spec:
   node: worker-3
   backend: firecracker
-  image: /var/lib/ephemera/images/sandbox.raw
+  image: /var/lib/fluxvm/images/sandbox.raw
   vcpus: 1
   memoryMib: 1024
   networkMode: none
@@ -105,7 +105,7 @@ CRD/operator" in the README).
 ## Multi-host fleets without Kubernetes
 
 Not every team wants a Kubernetes control plane just to spread disposable
-VMs across a handful of bare-metal or edge hosts. `ephemera-agent` is a
+VMs across a handful of bare-metal or edge hosts. `fluxvm-agent` is a
 lighter-weight alternative: a central fleet registry plus a per-host
 heartbeat client, with load-aware placement deciding which host a new VM
 request lands on — verified across two real, physically separate hosts.
@@ -114,7 +114,7 @@ full Kubernetes cluster is disproportionate to the actual workload.
 
 ## Sandboxed / untrusted code execution
 
-The combination that makes Ephemera suitable for running code you don't
+The combination that makes FluxVM suitable for running code you don't
 trust:
 
 - **Firecracker jailer** — chroot + uid/gid drop, so even a Firecracker
@@ -131,6 +131,12 @@ This is the same isolation shape used for malware analysis sandboxes, "run
 this untrusted PR's code" CI steps, and multi-tenant code-execution products
 — built from primitives this project already has, not a separate product.
 
+For how that compares to a full AI-agent sandbox product (tens-of-ms snapshot
+boot, egress vault, AutoPause), see
+[docs/agent-sandbox-gaps.md](agent-sandbox-gaps.md). The FluxVm backend
+(`backend: "flux-vm"`) is the agent-sandbox track: memory snapshots, `/v1/sandboxes`,
+guest HTTP proxy with AutoResume, L7 egress, and `/console`.
+
 ## Disposable dev/test environments
 
 Give every branch, PR, or engineer their own real VM — not a shared
@@ -142,7 +148,7 @@ someone steps away mid-session.
 
 ## Bring-your-own storage backend
 
-Beyond the default qcow2/raw overlay, Ephemera supports LVM thin snapshots,
+Beyond the default qcow2/raw overlay, FluxVM supports LVM thin snapshots,
 NBD-exported disks, and Ceph RBD as storage backends for VM disks — Ceph RBD
 verified against a real Rook Ceph cluster. This matters if you're deploying
 into infrastructure that already standardized on one of these (a SAN

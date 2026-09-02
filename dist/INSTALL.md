@@ -1,7 +1,7 @@
 # Installing zyvor-fabric v0.1.0
 
 A self-contained Linux (x86_64) distribution of **zyvor-fabric**, the control
-plane that drives [Ephemera](https://github.com/zyvorai/ephemera) as its VM
+plane that drives [FluxVM](https://github.com/zyvorai/fluxvm) as its VM
 backend. No `cargo`, `npm`, or network access is required on the target
 machine — everything needed is already built into the package.
 
@@ -9,10 +9,10 @@ machine — everything needed is already built into the package.
 
 ```
 zyvor-fabric-0.1.0-linux-x86_64/
-├── bin/            zyvor-fabricd, zyvorctl, ephemera
-├── vendor/         guestkit-agent-cli, zyvor-guest-agent, ephemera-guest-agent
-├── configs/        default zyvor-fabricd.toml, ephemera.toml, pam.d, logrotate.d
-├── systemd/        zyvor-fabricd.service, ephemera.service
+├── bin/            zyvor-fabricd, zyvorctl, fluxvm
+├── vendor/         guestkit-agent-cli, zyvor-guest-agent, fluxvm-guest-agent
+├── configs/        default zyvor-fabricd.toml, fluxvm.toml, pam.d, logrotate.d
+├── systemd/        zyvor-fabricd.service, fluxvm.service
 ├── web/            the built web dashboard
 ├── install.sh      offline installer (this is the only script you run)
 └── VERSION
@@ -24,7 +24,7 @@ zyvor-fabric-0.1.0-linux-x86_64/
   distributions)
 - KVM support (`/dev/kvm` present) for VM acceleration
 - Root access to install system-wide (binaries under `/usr/bin`, `/usr/local/bin`,
-  systemd units, and runtime state under `/var/lib/zyvor-fabricd`, `/var/lib/ephemera`)
+  systemd units, and runtime state under `/var/lib/zyvor-fabricd`, `/var/lib/fluxvm`)
 
 ## Install
 
@@ -34,18 +34,18 @@ cd zyvor-fabric-0.1.0-linux-x86_64
 sudo ./install.sh --start
 ```
 
-`--start` enables and starts both `ephemera.service` and `zyvor-fabricd.service`
+`--start` enables and starts both `fluxvm.service` and `zyvor-fabricd.service`
 immediately after installing. Leave it off if you'd rather review the generated
-configs under `/etc/zyvor-fabricd/` and `/etc/ephemera.toml` first, then start
+configs under `/etc/zyvor-fabricd/` and `/etc/fluxvm.toml` first, then start
 them yourself:
 
 ```bash
-sudo systemctl enable --now ephemera.service
+sudo systemctl enable --now fluxvm.service
 sudo systemctl enable --now zyvor-fabricd.service
 ```
 
 The installer is idempotent for configuration: it only writes
-`/etc/zyvor-fabricd/zyvor-fabricd.toml` and `/etc/ephemera.toml` if they don't
+`/etc/zyvor-fabricd/zyvor-fabricd.toml` and `/etc/fluxvm.toml` if they don't
 already exist, so re-running `install.sh` to upgrade binaries won't clobber
 any local config changes.
 
@@ -137,7 +137,7 @@ curl -sk -H "Authorization: Bearer $TOKEN" https://<host>:9095/api/license
 
 ```bash
 sudo journalctl -u zyvor-fabricd -n 50 --no-pager
-sudo journalctl -u ephemera -n 50 --no-pager
+sudo journalctl -u fluxvm -n 50 --no-pager
 ```
 
 **Dashboard unreachable** — confirm the service is listening:
@@ -157,5 +157,5 @@ and systemd units are overwritten, existing config files and VM state are
 left alone. Restart both services afterward:
 
 ```bash
-sudo systemctl restart ephemera.service zyvor-fabricd.service
+sudo systemctl restart fluxvm.service zyvor-fabricd.service
 ```

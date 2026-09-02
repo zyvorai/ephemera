@@ -1,10 +1,10 @@
 # Copyright 2026 Zyvor
 # SPDX-License-Identifier: Apache-2.0
 #
-# One instance per ephemera-capable node, matching the "node-local
-# daemonset" model crates/ephemera-kube/src/crd.rs and controller.rs are
+# One instance per fluxvm-capable node, matching the "node-local
+# daemonset" model crates/fluxvm-kube/src/crd.rs and controller.rs are
 # written for. Requires:
-#   - the node labeled `ragnarok.io/ephemera-capable: "true"` (KVM-capable,
+#   - the node labeled `ragnarok.io/fluxvm-capable: "true"` (KVM-capable,
 #     QEMU/CH/Firecracker tooling reachable, `nbd` kernel module loaded —
 #     the last one is a host prerequisite this DaemonSet cannot satisfy
 #     itself; see README.md)
@@ -14,35 +14,35 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: ephemera-kube
-  namespace: ephemera-system
+  name: fluxvm-kube
+  namespace: fluxvm-system
   labels:
-    app: ephemera-kube
+    app: fluxvm-kube
 spec:
   selector:
     matchLabels:
-      app: ephemera-kube
+      app: fluxvm-kube
   template:
     metadata:
       labels:
-        app: ephemera-kube
+        app: fluxvm-kube
     spec:
-      serviceAccountName: ephemera-kube
+      serviceAccountName: fluxvm-kube
       nodeSelector:
-        ragnarok.io/ephemera-capable: "true"
+        ragnarok.io/fluxvm-capable: "true"
       # TAP/bridge devices and the per-VM-netns dnsmasq DHCP server are
-      # host-network-namespace objects in Ephemera's design (see
-      # ephemera_network::netns and NetworkSpec::Tap) — the `ephemera`
+      # host-network-namespace objects in FluxVM's design (see
+      # fluxvm_network::netns and NetworkSpec::Tap) — the `fluxvm`
       # container needs the pod in the host's network namespace for that to
-      # mean anything, the same way ephemera.service runs directly on the
+      # mean anything, the same way fluxvm.service runs directly on the
       # host rather than in a container's isolated netns. Not a hardening
       # relaxation to revisit later.
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       containers:
-        - name: ephemera
-          image: ghcr.io/zyvorai/ephemera:0.1.0
-          command: ["ephemera", "--config", "/etc/ephemera.toml", "serve"]
+        - name: fluxvm
+          image: ghcr.io/zyvorai/fluxvm:0.1.0
+          command: ["fluxvm", "--config", "/etc/fluxvm.toml", "serve"]
           securityContext:
             capabilities:
               add: ["NET_ADMIN", "SYS_ADMIN", "NET_BIND_SERVICE", "NET_RAW"]
@@ -52,13 +52,13 @@ spec:
               mountPath: /dev/kvm
             - name: netns
               mountPath: /run/netns
-            - name: var-lib-ephemera
-              mountPath: /var/lib/ephemera
-            - name: run-ephemera
-              mountPath: /run/ephemera
+            - name: var-lib-fluxvm
+              mountPath: /var/lib/fluxvm
+            - name: run-fluxvm
+              mountPath: /run/fluxvm
             - name: config
-              mountPath: /etc/ephemera.toml
-              subPath: ephemera.toml
+              mountPath: /etc/fluxvm.toml
+              subPath: fluxvm.toml
           readinessProbe:
             httpGet:
               path: /healthz
@@ -71,9 +71,9 @@ spec:
               port: 7788
             initialDelaySeconds: 10
             periodSeconds: 20
-        - name: ephemera-kube
-          image: ghcr.io/zyvorai/ephemera:0.1.0
-          command: ["ephemera-kube"]
+        - name: fluxvm-kube
+          image: ghcr.io/zyvorai/fluxvm:0.1.0
+          command: ["fluxvm-kube"]
           env:
             # Must be the real Kubernetes node name — this is what a
             # DisposableVm's spec.node has to equal for this instance to
@@ -82,7 +82,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            - name: EPHEMERA_URL
+            - name: FLUXVM_URL
               value: "http://127.0.0.1:7788"
           securityContext:
             runAsNonRoot: true
@@ -100,14 +100,14 @@ spec:
           hostPath:
             path: /run/netns
             type: DirectoryOrCreate
-        - name: var-lib-ephemera
+        - name: var-lib-fluxvm
           hostPath:
-            path: /var/lib/ephemera
+            path: /var/lib/fluxvm
             type: DirectoryOrCreate
-        - name: run-ephemera
+        - name: run-fluxvm
           hostPath:
-            path: /run/ephemera
+            path: /run/fluxvm
             type: DirectoryOrCreate
         - name: config
           configMap:
-            name: ephemera-config
+            name: fluxvm-config

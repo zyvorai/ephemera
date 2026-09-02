@@ -14,13 +14,13 @@
 # Env:
 #   CLOUD_HYPERVISOR_VERSION   Pin a version (overridden by a positional arg)
 #   INSTALL_DIR                Where to install the binary (default /usr/local/bin)
-#   FIRMWARE_DIR                Where to install hypervisor-fw (default /usr/local/share/ephemera)
+#   FIRMWARE_DIR                Where to install hypervisor-fw (default /usr/local/share/fluxvm)
 set -euo pipefail
 
 REPO="cloud-hypervisor/cloud-hypervisor"
 FW_REPO="cloud-hypervisor/rust-hypervisor-firmware"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
-FIRMWARE_DIR="${FIRMWARE_DIR:-/usr/local/share/ephemera}"
+FIRMWARE_DIR="${FIRMWARE_DIR:-/usr/local/share/fluxvm}"
 VERSION="${CLOUD_HYPERVISOR_VERSION:-}"
 WITH_FIRMWARE=true
 
@@ -114,7 +114,7 @@ for a in d.get('assets', []):
 fi
 
 # ch-remote is a separate asset in the same release — needed for
-# pause/resume/shutdown (ephemera shells out to it rather than talking to
+# pause/resume/shutdown (fluxvm shells out to it rather than talking to
 # the API socket directly).
 if command -v ch-remote >/dev/null 2>&1; then
     ok "ch-remote already installed"
@@ -186,7 +186,7 @@ for a in d.get('assets', []):
         $SUDO install -d -m755 "${FIRMWARE_DIR}"
         $SUDO install -m644 "${TMP}/hypervisor-fw" "${FIRMWARE_DIR}/hypervisor-fw"
         ok "installed ${FIRMWARE_DIR}/hypervisor-fw"
-        echo "  Set cloud_hypervisor_firmware = \"${FIRMWARE_DIR}/hypervisor-fw\" in your ephemera config to use firmware boot."
+        echo "  Set cloud_hypervisor_firmware = \"${FIRMWARE_DIR}/hypervisor-fw\" in your fluxvm config to use firmware boot."
     else
         echo "  [WARN] could not find ${FW_ASSET} asset; skipping firmware install" >&2
     fi

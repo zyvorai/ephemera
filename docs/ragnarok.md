@@ -1,23 +1,23 @@
-# Using Ephemera with Ragnarok
+# Using FluxVM with Ragnarok
 
-[Ragnarok](https://zyvor.dev/ragnarok) is the primary product UI/API that consumes Ephemera’s Kubernetes path (`DisposableVm` + `ephemera-kube`). Ephemera stays a focused disposable-VM engine; Ragnarok is the operator console, RBAC, and SSO layer on top.
+[Ragnarok](https://zyvor.dev/ragnarok) is the primary product UI/API that consumes FluxVM’s Kubernetes path (`DisposableVm` + `fluxvm-kube`). FluxVM stays a focused disposable-VM engine; Ragnarok is the operator console, RBAC, and SSO layer on top.
 
 ## Roles
 
 | Layer | Owns |
 |-------|------|
-| **Ephemera** | QEMU / Cloud Hypervisor / Firecracker VMs, TTL reaper, `ephemera serve`, `DisposableVm` CRD + node DaemonSet |
-| **Ragnarok** | KubeVirt fleet + Ephemera Hub UI/API, JWT/OIDC/LDAP auth, RBAC, audit |
+| **FluxVM** | QEMU / Cloud Hypervisor / Firecracker VMs, TTL reaper, `fluxvm serve`, `DisposableVm` CRD + node DaemonSet |
+| **Ragnarok** | KubeVirt fleet + FluxVM Hub UI/API, JWT/OIDC/LDAP auth, RBAC, audit |
 
-Ragnarok never calls `ephemera serve` over the host REST API from the product path — it creates/reads/deletes `DisposableVm` CRs and lets the per-node operator talk to a **local** `ephemera serve`.
+Ragnarok never calls `fluxvm serve` over the host REST API from the product path — it creates/reads/deletes `DisposableVm` CRs and lets the per-node operator talk to a **local** `fluxvm serve`.
 
 ## Install order (customer / lab)
 
-0. **Optional — Ragnarok binary trial** (proprietary; Ephemera stays free):
+0. **Optional — Ragnarok binary trial** (proprietary; FluxVM stays free):
 
    ```bash
    VER=0.5.1
-   curl -LO "https://github.com/zyvorai/ephemera/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz"
+   curl -LO "https://github.com/zyvorai/fluxvm/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz"
    tar xzf "ragnarok-${VER}-linux-amd64.tar.gz" && cd "ragnarok-${VER}-linux-amd64"
    ls -l trial.token    # signed evaluation token — keep beside ./ragnarok
    ./install.sh
@@ -29,29 +29,29 @@ Ragnarok never calls `ephemera serve` over the host REST API from the product pa
    `--set license.key=<jwt>` (same JWT as `trial.token`). After expiry:
    **sales@zyvor.dev** for a renewed token.
 
-1. **Ephemera on capable nodes** — see `deploy/k8s/` in this repo (and [Kubernetes deployment](https://zyvor.dev/docs/ephemera-manual/kubernetes-deployment) on the site):
+1. **FluxVM on capable nodes** — see `deploy/k8s/` in this repo (and [Kubernetes deployment](https://zyvor.dev/docs/fluxvm-manual/kubernetes-deployment) on the site):
 
    ```bash
    kubectl apply -f deploy/k8s/namespace.yaml
    kubectl apply -f deploy/k8s/crd.yaml
    kubectl apply -f deploy/k8s/rbac.yaml
    kubectl apply -f deploy/k8s/daemonset.yaml
-   kubectl label node <node> ragnarok.io/ephemera-capable=true
+   kubectl label node <node> ragnarok.io/fluxvm-capable=true
    # Stage VM images under the DaemonSet state_dir hostPath on each node
    ```
 
 2. **Ragnarok** — install KubeVirt first, then Ragnarok (Helm / Kustomize / `./scripts/deploy-remote.sh`). Docs:
    - Technical: [zyvor.dev Ragnarok docs](https://zyvor.dev/docs/ragnarok)
    - Customer manual: [Ragnarok manual](https://zyvor.dev/docs/ragnarok-manual)
-   - OIDC/SSO: Ragnarok repo `docs/OIDC.md` and deploy `--with-oidc` (IdP proxy is Ragnarok’s concern; Ephemera does not terminate SSO)
+   - OIDC/SSO: Ragnarok repo `docs/OIDC.md` and deploy `--with-oidc` (IdP proxy is Ragnarok’s concern; FluxVM does not terminate SSO)
 
-3. **Open Ragnarok UI** → **Ephemera VMs** (or Confidential / Ephemera Hub). If the operator is missing, Ragnarok shows an explicit “operator not detected” banner instead of a silent empty list.
+3. **Open Ragnarok UI** → **FluxVM VMs** (or Confidential / FluxVM Hub). If the operator is missing, Ragnarok shows an explicit “operator not detected” banner instead of a silent empty list.
 
 ## What Ragnarok adds
 
-- `GET /api/v1/ephemera/capability` — CRD present?
-- `GET /api/v1/ephemera/nodes` — nodes labeled `ragnarok.io/ephemera-capable=true`
-- CRUD under `/api/v1/ephemera/vms` — namespace-scoped to the caller’s RBAC
+- `GET /api/v1/fluxvm/capability` — CRD present?
+- `GET /api/v1/fluxvm/nodes` — nodes labeled `ragnarok.io/fluxvm-capable=true`
+- CRUD under `/api/v1/fluxvm/vms` — namespace-scoped to the caller’s RBAC
 
 No Ragnarok-specific CRD fields: anything you can `kubectl apply` as a `DisposableVm`, Ragnarok can create.
 
@@ -59,18 +59,18 @@ No Ragnarok-specific CRD fields: anything you can `kubectl apply` as a `Disposab
 
 | Product | Manual |
 |---------|--------|
-| Ephemera | https://zyvor.dev/docs/ephemera-manual |
+| FluxVM | https://zyvor.dev/docs/fluxvm-manual |
 | Ragnarok | https://zyvor.dev/docs/ragnarok-manual |
 | Suite index | https://zyvor.dev/docs/customer-manuals |
 
 ## Auth note
 
-**Ephemera is free** (Apache-2.0) — no Ragnarok license token applies to it.
+**FluxVM is free** (Apache-2.0) — no Ragnarok license token applies to it.
 
 SSO (Keycloak OIDC), local break-glass, LDAP, and the Ragnarok signed
 `trial.token` / commercial JWT live entirely in **Ragnarok** (proprietary).
-Ephemera’s own REST API uses optional bearer tokens for direct `ephemera serve`
+FluxVM’s own REST API uses optional bearer tokens for direct `fluxvm serve`
 callers; that is separate from the Ragnarok dashboard login and from Ragnarok
 trial tokens (`scripts/trial-tool.py` stays in the private Ragnarok repo only).
 
-See also the longer integration notes in the [root README — Using Ephemera through Ragnarok](../README.md#using-ephemera-through-ragnarok).
+See also the longer integration notes in the [root README — Using FluxVM through Ragnarok](../README.md#using-fluxvm-through-ragnarok).

@@ -1,0 +1,55 @@
+# Copyright 2026 Zyvor
+# SPDX-License-Identifier: Apache-2.0
+
+[Unit]
+Description=Zyvor FluxVM control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# /run/netns must exist before ProtectSystem namespaces are applied, or
+# systemd fails start with status 226/NAMESPACE (ReadWritePaths=/run/netns).
+ExecStartPre=/usr/bin/mkdir -p /run/netns /run/fluxvm /var/lib/fluxvm
+ExecStart=/usr/local/bin/fluxvm --config /etc/fluxvm.toml serve
+Restart=on-failure
+RestartSec=2
+# Default KillMode (control-group) would SIGTERM every QEMU child process
+# along with fluxvm itself on every restart/upgrade, killing every
+# running VM. `reconcile()` (fluxvm-scheduler) is explicitly designed to
+# reattach to an already-running VM by checking its stored PID is still
+# alive, not by re-launching it -- so a bare `process` KillMode (only the
+# tracked ExecStart PID, QEMU children left alone) is exactly what lets a
+# binary upgrade/restart happen without disrupting live VMs.
+KillMode=process
+# TAP creation needs CAP_NET_ADMIN. KVM needs /dev/kvm access. Disk
+# provisioning (cloud-init/agent injection via guestfs) attaches the image
+# through /dev/nbd*, which needs CAP_SYS_ADMIN for the NBD_SET_SOCK ioctl.
+# CAP_NET_BIND_SERVICE + CAP_NET_RAW: the per-VM-namespace dnsmasq DHCP
+# server (see fluxvm_network::netns) binds UDP/67 (a privileged port) and
+# needs raw sockets for its own DHCP internals -- found live, one at a
+# time: first "Permission denied" binding :67, then (after adding
+# NET_BIND_SERVICE) "process is missing required capability NET_RAW".
+# CAP_SYS_CHROOT: image customization (`POST /v1/images/build`'s `packages`/
+# `commands`/`enable_services`) execs inside the mounted guest via
+# `guestkit::Guestfs::command`, which chroots into it -- found live,
+# "chroot: cannot change root directory: Operation not permitted" baking
+# fluxvm-guest-agent into a base image (CAP_SYS_ADMIN alone covers the
+# NBD/mount side of guestkit but not the chroot(2) syscall itself).
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SYS_CHROOT
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SYS_CHROOT
+NoNewPrivileges=true
+ProtectSystem=strict
+# Images may live under /home during lab deploys; read-only is enough.
+ProtectHome=read-only
+# guestkit (disk customization/agent-token injection) needs a scratch mount
+# root under /run or /tmp; PrivateTmp gives it an isolated, writable /tmp
+# without opening up the host's shared one.
+PrivateTmp=true
+# /run/netns: per-VM network namespaces (NetworkSpec::Tap { netns: true })
+# persist as bind-mount targets there -- the standard iproute2/kernel
+# location, not something fluxvm can relocate.
+ReadWritePaths=/var/lib/fluxvm /run/fluxvm /var/lock /run/netns
+
+[Install]
+WantedBy=multi-user.target

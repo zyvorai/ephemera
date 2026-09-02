@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Real two-host regression test for the distributed node-agent
-# (ephemera-agent central/node) — proves the multi-host fleet story, not
-# just a single local ephemera. Run from a control machine with SSH access
-# to two already-deployed ephemera hosts (see scripts/deploy-remote.sh);
+# (fluxvm-agent central/node) — proves the multi-host fleet story, not
+# just a single local fluxvm. Run from a control machine with SSH access
+# to two already-deployed fluxvm hosts (see scripts/deploy-remote.sh);
 # orchestrates both remote hosts over SSH, the same way deploy-remote.sh
 # does, rather than running on either host itself.
 #
@@ -23,11 +23,11 @@
 #
 # Usage:
 #   ./scripts/test-fleet-agent.sh \
-#       --central sus@175.110.122.71 --central-image /var/lib/ephemera/images/test.qcow2 \
-#       --node sus@80.79.5.173      --node-image    /var/lib/ephemera/images/test.qcow2
+#       --central sus@175.110.122.71 --central-image /var/lib/fluxvm/images/test.qcow2 \
+#       --node sus@80.79.5.173      --node-image    /var/lib/fluxvm/images/test.qcow2
 #
-# Both hosts must already have `ephemera` and `ephemera-agent` built at
-# /home/<user>/.deployments/ephemera/target/release/ (see deploy-remote.sh)
+# Both hosts must already have `fluxvm` and `fluxvm-agent` built at
+# /home/<user>/.deployments/fluxvm/target/release/ (see deploy-remote.sh)
 # and must be able to reach each other's IP directly (no NAT between them).
 set -euo pipefail
 
@@ -51,7 +51,7 @@ done
 
 CENTRAL_HOST="${CENTRAL#*@}"
 NODE_HOST="${NODE#*@}"
-DEPLOY_DIR="/home/\$(whoami)/.deployments/ephemera"
+DEPLOY_DIR="/home/\$(whoami)/.deployments/fluxvm"
 CENTRAL_EPH_PORT=17795
 CENTRAL_FLEET_PORT=17798
 NODE_EPH_PORT=17795
@@ -66,22 +66,22 @@ cleanup() {
     # The bracket trick (`[t]arget/...` instead of `target/...`) keeps
     # pgrep/pkill's own invocation from matching its own command line — a
     # real, hard-learned bug in an earlier version of this cleanup: a plain
-    # `sudo pkill -f "target/release/ephemera --config ..."` matches ITS
+    # `sudo pkill -f "target/release/fluxvm --config ..."` matches ITS
     # OWN argv too (which literally contains that same pattern string),
     # SIGTERMing itself before it ever reached the real target process —
-    # the remote `ephemera serve` survived, silently, every time.
-    ssh "$CENTRAL" 'pgrep -f "[t]arget/release/ephemera-agent (central|node)" | xargs -r kill 2>/dev/null; sudo pkill -f "[t]arget/release/ephemera --config /tmp/ephemera-fleet-test" 2>/dev/null; sudo rm -rf /tmp/ephemera-fleet-test' >/dev/null 2>&1 || true
-    ssh "$NODE" 'pgrep -f "[t]arget/release/ephemera-agent node" | xargs -r kill 2>/dev/null; sudo pkill -f "[t]arget/release/ephemera --config /tmp/ephemera-fleet-test" 2>/dev/null; sudo rm -rf /tmp/ephemera-fleet-test' >/dev/null 2>&1 || true
+    # the remote `fluxvm serve` survived, silently, every time.
+    ssh "$CENTRAL" 'pgrep -f "[t]arget/release/fluxvm-agent (central|node)" | xargs -r kill 2>/dev/null; sudo pkill -f "[t]arget/release/fluxvm --config /tmp/fluxvm-fleet-test" 2>/dev/null; sudo rm -rf /tmp/fluxvm-fleet-test' >/dev/null 2>&1 || true
+    ssh "$NODE" 'pgrep -f "[t]arget/release/fluxvm-agent node" | xargs -r kill 2>/dev/null; sudo pkill -f "[t]arget/release/fluxvm --config /tmp/fluxvm-fleet-test" 2>/dev/null; sudo rm -rf /tmp/fluxvm-fleet-test' >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-start_ephemera() {
+start_fluxvm() {
     local target="$1" image_dir_hint="$2"
     ssh "$target" "
-        EPH=\$(ls \$HOME/.deployments/ephemera/target/release/ephemera 2>/dev/null || command -v ephemera)
-        TMP=/tmp/ephemera-fleet-test
+        EPH=\$(ls \$HOME/.deployments/fluxvm/target/release/fluxvm 2>/dev/null || command -v fluxvm)
+        TMP=/tmp/fluxvm-fleet-test
         sudo rm -rf \"\$TMP\"; mkdir -p \"\$TMP/state\" \"\$TMP/run\"
-        cat > \"\$TMP/ephemera.toml\" <<TOML
+        cat > \"\$TMP/fluxvm.toml\" <<TOML
 listen = \"0.0.0.0:${NODE_EPH_PORT}\"
 state_dir = \"\${TMP}/state\"
 run_dir = \"\${TMP}/run\"
@@ -94,25 +94,25 @@ firecracker_binary = \"firecracker\"
 default_bridge = \"vmbr0\"
 reaper_interval_secs = 5
 TOML
-        sudo \"\$EPH\" --config \"\$TMP/ephemera.toml\" serve > \"\$TMP/serve.log\" 2>&1 < /dev/null &
+        sudo \"\$EPH\" --config \"\$TMP/fluxvm.toml\" serve > \"\$TMP/serve.log\" 2>&1 < /dev/null &
         disown
         sleep 2
         curl -sS http://127.0.0.1:${NODE_EPH_PORT}/healthz
     "
 }
 
-section "Starting a real ephemera serve on each host"
-start_ephemera "$CENTRAL" "$CENTRAL_IMAGE" | grep -q '"ok":true' \
-    && pass "ephemera serve up on central host ($CENTRAL_HOST)" \
-    || { fail "ephemera serve failed on central host"; exit 1; }
-start_ephemera "$NODE" "$NODE_IMAGE" | grep -q '"ok":true' \
-    && pass "ephemera serve up on node host ($NODE_HOST)" \
-    || { fail "ephemera serve failed on node host"; exit 1; }
+section "Starting a real fluxvm serve on each host"
+start_fluxvm "$CENTRAL" "$CENTRAL_IMAGE" | grep -q '"ok":true' \
+    && pass "fluxvm serve up on central host ($CENTRAL_HOST)" \
+    || { fail "fluxvm serve failed on central host"; exit 1; }
+start_fluxvm "$NODE" "$NODE_IMAGE" | grep -q '"ok":true' \
+    && pass "fluxvm serve up on node host ($NODE_HOST)" \
+    || { fail "fluxvm serve failed on node host"; exit 1; }
 
 section "Starting the central fleet registry"
 ssh "$CENTRAL" "
-    AGENT=\$(ls \$HOME/.deployments/ephemera/target/release/ephemera-agent)
-    \"\$AGENT\" central --listen 0.0.0.0:${CENTRAL_FLEET_PORT} > /tmp/ephemera-fleet-test/central.log 2>&1 < /dev/null &
+    AGENT=\$(ls \$HOME/.deployments/fluxvm/target/release/fluxvm-agent)
+    \"\$AGENT\" central --listen 0.0.0.0:${CENTRAL_FLEET_PORT} > /tmp/fluxvm-fleet-test/central.log 2>&1 < /dev/null &
     disown
     sleep 2
     curl -sS http://127.0.0.1:${CENTRAL_FLEET_PORT}/healthz
@@ -120,17 +120,17 @@ ssh "$CENTRAL" "
 
 section "Starting both node agents, pointed at the real remote central"
 ssh "$CENTRAL" "
-    AGENT=\$(ls \$HOME/.deployments/ephemera/target/release/ephemera-agent)
+    AGENT=\$(ls \$HOME/.deployments/fluxvm/target/release/fluxvm-agent)
     NODE_NAME=node-a CENTRAL_URL=http://${CENTRAL_HOST}:${CENTRAL_FLEET_PORT} \
-    EPHEMERA_URL=http://127.0.0.1:${CENTRAL_EPH_PORT} ADVERTISE_URL=http://${CENTRAL_HOST}:${CENTRAL_EPH_PORT} \
-    \"\$AGENT\" node --interval-secs 5 > /tmp/ephemera-fleet-test/node-agent.log 2>&1 < /dev/null &
+    FLUXVM_URL=http://127.0.0.1:${CENTRAL_EPH_PORT} ADVERTISE_URL=http://${CENTRAL_HOST}:${CENTRAL_EPH_PORT} \
+    \"\$AGENT\" node --interval-secs 5 > /tmp/fluxvm-fleet-test/node-agent.log 2>&1 < /dev/null &
     disown
 "
 ssh "$NODE" "
-    AGENT=\$(ls \$HOME/.deployments/ephemera/target/release/ephemera-agent)
+    AGENT=\$(ls \$HOME/.deployments/fluxvm/target/release/fluxvm-agent)
     NODE_NAME=node-b CENTRAL_URL=http://${CENTRAL_HOST}:${CENTRAL_FLEET_PORT} \
-    EPHEMERA_URL=http://127.0.0.1:${NODE_EPH_PORT} ADVERTISE_URL=http://${NODE_HOST}:${NODE_EPH_PORT} \
-    \"\$AGENT\" node --interval-secs 5 > /tmp/ephemera-fleet-test/node-agent.log 2>&1 < /dev/null &
+    FLUXVM_URL=http://127.0.0.1:${NODE_EPH_PORT} ADVERTISE_URL=http://${NODE_HOST}:${NODE_EPH_PORT} \
+    \"\$AGENT\" node --interval-secs 5 > /tmp/fluxvm-fleet-test/node-agent.log 2>&1 < /dev/null &
     disown
 "
 sleep 7

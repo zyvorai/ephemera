@@ -11,7 +11,7 @@ Backends, storage, auth, policy, and agent settings.
 
 ## Guide
 
-Ephemera is configured through one TOML file (`/etc/ephemera.toml` by default, or `--config <path>`), plus per-VM fields on each create request.
+FluxVM is configured through one TOML file (`/etc/fluxvm.toml` by default, or `--config <path>`), plus per-VM fields on each create request.
 
 ## Backend and storage binaries
 
@@ -25,7 +25,7 @@ Every create request may set `"storage"` to switch how that VM's disk is provisi
 |-------|----------------|
 | `lvm-thin` | `image` must be a `/dev/<vg>/<lv>` path to an existing LVM thin logical volume |
 | `nbd` | QEMU only — no extra config; a `qemu-nbd` subprocess is spawned automatically |
-| `ceph-rbd` | A `[storage]` section with `ceph_user`/`ceph_conf`; `image` is a `pool/image` reference with a protected `ephemera-base` snapshot already on it |
+| `ceph-rbd` | A `[storage]` section with `ceph_user`/`ceph_conf`; `image` is a `pool/image` reference with a protected `fluxvm-base` snapshot already on it |
 
 ## Isolation and resource control
 
@@ -43,7 +43,7 @@ An optional `[policy]` section caps `max_vcpus`, `max_memory_mib`, `max_disk_gib
 
 ## Troubleshooting
 
-- **A `storage=ceph-rbd` create fails immediately** — confirm `[storage].ceph_conf` points at a real `ceph.conf`, the referenced pool/image exists, and it has a protected snapshot named `ephemera-base`.
+- **A `storage=ceph-rbd` create fails immediately** — confirm `[storage].ceph_conf` points at a real `ceph.conf`, the referenced pool/image exists, and it has a protected snapshot named `fluxvm-base`.
 - **Auth returns 401 on every request** — a token is configured but wasn't sent, or doesn't match; requests need `Authorization: Bearer <token>`.
 - **A policy-restricted create is rejected** — the response's error message names exactly which `[policy]` limit was exceeded.
 

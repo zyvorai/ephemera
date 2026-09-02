@@ -1,0 +1,20 @@
+# Copyright 2026 Zyvor
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "fluxvm-network"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "TAP/bridge network preparation for Zyvor FluxVM"
+
+[dependencies]
+fluxvm-core = { path = "../fluxvm-core" }
+anyhow = "1"
+axum = "0.8"
+libc = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }

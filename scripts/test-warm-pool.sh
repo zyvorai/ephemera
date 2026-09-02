@@ -6,10 +6,10 @@
 # claim_from_pool / delete_pool). Boots real QEMU VMs.
 #
 # Proves:
-# - `ephemera pool create` (a one-shot CLI process) leaves the pool actually
+# - `fluxvm pool create` (a one-shot CLI process) leaves the pool actually
 #   full by the time it exits, not just "eventually, if something else
 #   happens to finish the job" (see VmManager::backfill_pool_sync)
-# - claiming through the REST API against a running `ephemera serve` daemon
+# - claiming through the REST API against a running `fluxvm serve` daemon
 #   pops a ready member and resumes it MUCH faster than a full create would
 #   take (timed against a plain create for comparison)
 # - the daemon backfills the pool again after each claim on its own reaper
@@ -18,7 +18,7 @@
 # - deleting a pool cleans up every member VM it still owns
 #
 # Claims specifically go through REST against a running `serve` daemon, NOT
-# the bare `ephemera pool claim` CLI command — `claim_from_pool` fires its
+# the bare `fluxvm pool claim` CLI command — `claim_from_pool` fires its
 # replenishment off as a background task (see VmManager::spawn_backfill),
 # which only actually finishes if the process that started it stays alive.
 # Inside `serve` that's true by construction; a one-shot CLI invocation of
@@ -31,13 +31,13 @@
 # real, current, documented behavior, not a test workaround.
 #
 # Usage:
-#   sudo ./scripts/test-warm-pool.sh --image /var/lib/ephemera/images/ephemera-lifecycle-test.qcow2
+#   sudo ./scripts/test-warm-pool.sh --image /var/lib/fluxvm/images/fluxvm-lifecycle-test.qcow2
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-CONFIG="/etc/ephemera.toml"
+CONFIG="/etc/fluxvm.toml"
 [ -f "$CONFIG" ] || CONFIG=""
 IMAGE=""
 BASE_URL="http://127.0.0.1:7788"
@@ -56,17 +56,17 @@ done
 
 [ "$(uname -s)" = "Linux" ] || { echo "This test boots real VMs and requires a Linux/KVM host." >&2; exit 1; }
 [ -e /dev/kvm ] || { echo "/dev/kvm missing — enable virtualization first." >&2; exit 1; }
-[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — VM creation needs /var/lib/ephemera access." >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — VM creation needs /var/lib/fluxvm access." >&2; exit 1; }
 [ -n "$IMAGE" ] && [ -f "$IMAGE" ] || { echo "--image is required and must exist" >&2; exit 1; }
 
-EPH="${EPHEMERA_BIN:-}"
+EPH="${FLUXVM_BIN:-}"
 if [ -z "$EPH" ]; then
-    if command -v ephemera >/dev/null 2>&1; then
-        EPH="$(command -v ephemera)"
-    elif [ -x "${PROJECT_DIR}/target/release/ephemera" ]; then
-        EPH="${PROJECT_DIR}/target/release/ephemera"
+    if command -v fluxvm >/dev/null 2>&1; then
+        EPH="$(command -v fluxvm)"
+    elif [ -x "${PROJECT_DIR}/target/release/fluxvm" ]; then
+        EPH="${PROJECT_DIR}/target/release/fluxvm"
     else
-        echo "ephemera binary not found. Build it (cargo build --release -p ephemera-cli) or set EPHEMERA_BIN." >&2
+        echo "fluxvm binary not found. Build it (cargo build --release -p fluxvm-cli) or set FLUXVM_BIN." >&2
         exit 1
     fi
 fi
@@ -81,7 +81,7 @@ fail() { FAIL=$((FAIL + 1)); echo "  [FAIL] $1" >&2; }
 section() { echo ""; echo "=== $1 ==="; }
 
 TMP="$(mktemp -d)"
-POOL="ephemera-pool-test"
+POOL="fluxvm-pool-test"
 SERVE_PID=""
 cleanup() {
     [ -n "$SERVE_PID" ] && { kill "$SERVE_PID" >/dev/null 2>&1 || true; wait "$SERVE_PID" 2>/dev/null || true; }
@@ -149,7 +149,7 @@ done
 
 section "Baseline: how long a plain create takes"
 cat > "${TMP}/plain.json" <<JSON
-{"name":"ephemera-plain-baseline","backend":"qemu","image":"${IMAGE}","vcpus":1,"memory_mib":768,"network":{"mode":"none"},"agent":{"enabled":true,"port":17777}}
+{"name":"fluxvm-plain-baseline","backend":"qemu","image":"${IMAGE}","vcpus":1,"memory_mib":768,"network":{"mode":"none"},"agent":{"enabled":true,"port":17777}}
 JSON
 T0=$(date +%s.%N)
 PLAIN_ID=$(eph create --spec "${TMP}/plain.json" | json_field id)
@@ -157,14 +157,14 @@ CREATE_SECS=$(python3 -c "print(f'{$(date +%s.%N) - $T0:.1f}')")
 echo "  plain create took ${CREATE_SECS}s"
 eph delete "$PLAIN_ID" >/dev/null 2>&1 || true
 
-section "Start a real 'ephemera serve' daemon"
+section "Start a real 'fluxvm serve' daemon"
 "$EPH" "${CFG_ARGS[@]}" serve > "${TMP}/serve.log" 2>&1 &
 SERVE_PID=$!
 sleep 2
 if kill -0 "$SERVE_PID" 2>/dev/null; then
-    pass "ephemera serve started (pid ${SERVE_PID})"
+    pass "fluxvm serve started (pid ${SERVE_PID})"
 else
-    fail "ephemera serve failed to start — see ${TMP}/serve.log"
+    fail "fluxvm serve failed to start — see ${TMP}/serve.log"
     cat "${TMP}/serve.log" >&2 || true
 fi
 
@@ -222,7 +222,7 @@ section "Stop the daemon before deleting the pool (avoid racing its reaper)"
 kill "$SERVE_PID" >/dev/null 2>&1 || true
 wait "$SERVE_PID" 2>/dev/null || true
 SERVE_PID=""
-pass "ephemera serve stopped"
+pass "fluxvm serve stopped"
 
 section "Delete pool cleans up remaining members"
 REMAINING=$(eph pool get "$POOL" | python3 -c "import json,sys;print(len(json.load(sys.stdin)['members']))" 2>/dev/null || echo 0)

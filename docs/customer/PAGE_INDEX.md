@@ -1,4 +1,4 @@
-# Ephemera — Complete page index
+# FluxVM — Complete page index
 
 Every primary navigable dashboard route.
 
@@ -10,7 +10,7 @@ Regenerate: `node scripts/customer-docs/generate-page-index.mjs`
 
 | Page | Route | Purpose | Guide |
 |------|-------|---------|-------|
-| Getting Started | `getting-started` | Install Ephemera and boot your first disposable VM. | [Open](pages/onboarding/getting-started.md) |
+| Getting Started | `getting-started` | Install FluxVM and boot your first disposable VM. | [Open](pages/onboarding/getting-started.md) |
 | Use Cases | `use-cases` | Concrete scenarios — CI runners, golden images, fleets, sandboxes. | [Open](pages/onboarding/use-cases.md) |
 
 ## Setup
@@ -47,7 +47,7 @@ Regenerate: `node scripts/customer-docs/generate-page-index.mjs`
 
 | Page | Route | Purpose | Guide |
 |------|-------|---------|-------|
-| Ragnarok Integration | `ragnarok-integration` | Drive Ephemera disposable VMs from Ragnarok UI + SSO. | [Open](pages/integrations/ragnarok-integration.md) |
+| Ragnarok Integration | `ragnarok-integration` | Drive FluxVM disposable VMs from Ragnarok UI + SSO. | [Open](pages/integrations/ragnarok-integration.md) |
 
 ## Related
 

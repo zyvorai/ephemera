@@ -11,7 +11,7 @@ Build and customize guest OS images for disposable VMs.
 
 ## Guide
 
-`ephemera build-image` takes a base disk image and applies customizations —
+`fluxvm build-image` takes a base disk image and applies customizations —
 hostname, package installs, arbitrary commands, SSH-key injection, file
 copy-in, and systemd service enablement — to produce a new, ready-to-boot
 image. It does this through [GuestKit](/guestkit) mounting the image
@@ -24,7 +24,7 @@ supports: Debian/Ubuntu (`apt`), RHEL-family (`dnf`/`tdnf`/`yum`), and Arch
 Linux (`pacman`). Every example here is real-hardware-verified and covered
 by an automated CI job that runs the same checks against fresh Ubuntu,
 Rocky Linux, and Arch cloud images on every commit — see
-[`scripts/test-image-customize.sh`](https://github.com/zyvorai/ephemera/blob/main/scripts/test-image-customize.sh)
+[`scripts/test-image-customize.sh`](https://github.com/zyvorai/fluxvm/blob/main/scripts/test-image-customize.sh)
 in the repo.
 
 ## How it works, briefly
@@ -64,19 +64,19 @@ the base image plus the output image — no VMM, no `/dev/kvm`.
 
 ```json
 {
-  "source": "/var/lib/ephemera/images/ubuntu-noble.qcow2",
-  "output": "/var/lib/ephemera/images/ubuntu-dev.qcow2",
+  "source": "/var/lib/fluxvm/images/ubuntu-noble.qcow2",
+  "output": "/var/lib/fluxvm/images/ubuntu-dev.qcow2",
   "format": "qcow2",
   "hostname": "ubuntu-dev",
   "packages": ["tree", "jq", "qemu-guest-agent"],
-  "commands": ["touch /etc/provisioned-by-ephemera"],
+  "commands": ["touch /etc/provisioned-by-fluxvm"],
   "ssh_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@example.com",
   "enable_services": ["qemu-guest-agent", "cron"]
 }
 ```
 
 ```bash
-sudo ephemera build-image --spec ubuntu-dev.json
+sudo fluxvm build-image --spec ubuntu-dev.json
 ```
 
 Ubuntu's stock cloud image enables the `universe` component by default, so
@@ -88,18 +88,18 @@ name).
 
 ```json
 {
-  "source": "/var/lib/ephemera/images/rocky9.qcow2",
-  "output": "/var/lib/ephemera/images/rocky9-dev.qcow2",
+  "source": "/var/lib/fluxvm/images/rocky9.qcow2",
+  "output": "/var/lib/fluxvm/images/rocky9-dev.qcow2",
   "format": "qcow2",
   "hostname": "rocky-dev",
   "packages": ["tree", "jq"],
-  "commands": ["touch /etc/provisioned-by-ephemera"],
+  "commands": ["touch /etc/provisioned-by-fluxvm"],
   "enable_services": ["crond"]
 }
 ```
 
 ```bash
-sudo ephemera build-image --spec rocky-dev.json
+sudo fluxvm build-image --spec rocky-dev.json
 ```
 
 Rocky's `GenericCloud` image ships `cronie` (providing `crond.service`)
@@ -111,18 +111,18 @@ pre-installed — `enable_services: ["crond"]` works without needing
 
 ```json
 {
-  "source": "/var/lib/ephemera/images/arch.qcow2",
-  "output": "/var/lib/ephemera/images/arch-dev.qcow2",
+  "source": "/var/lib/fluxvm/images/arch.qcow2",
+  "output": "/var/lib/fluxvm/images/arch-dev.qcow2",
   "format": "qcow2",
   "hostname": "arch-dev",
   "packages": ["tree", "jq"],
-  "commands": ["touch /etc/provisioned-by-ephemera"],
+  "commands": ["touch /etc/provisioned-by-fluxvm"],
   "enable_services": ["sshd"]
 }
 ```
 
 ```bash
-sudo ephemera build-image --spec arch-dev.json
+sudo fluxvm build-image --spec arch-dev.json
 ```
 
 Arch needs two things every other distro here doesn't — both handled for
@@ -148,7 +148,7 @@ mounting it directly, the same way it was built:
 
 ```bash
 sudo modprobe nbd max_part=16
-sudo qemu-nbd -c /dev/nbd0 /var/lib/ephemera/images/ubuntu-dev.qcow2
+sudo qemu-nbd -c /dev/nbd0 /var/lib/fluxvm/images/ubuntu-dev.qcow2
 sudo partprobe /dev/nbd0 && sudo udevadm settle
 sudo mount /dev/nbd0p1 /mnt   # partition number varies by image layout
 cat /mnt/etc/hostname
@@ -172,7 +172,7 @@ sudo qemu-nbd -d /dev/nbd0
 
 - [Common workflows](../operations/workflows.md)
 - [Use cases](../onboarding/use-cases.md)
-- [Technical docs](/docs/ephemera)
+- [Technical docs](/docs/fluxvm)
 
 ## Operate from the console (UX)
 

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # ─────────────────────────────────────────────────────────────
-# Zyvor Ephemera — Remote deployment (SSH + rsync)
+# Zyvor FluxVM — Remote deployment (SSH + rsync)
 #
 # Profiles:
 #   default     Sync source → install deps → build on remote → verify
@@ -21,7 +21,7 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VERSION="1.0.0"
 REMOTE_DIR=""
 DEPLOY_PROFILE="full"
-DEPLOY_LOG="${EPHEMERA_DEPLOY_LOG:-${HOME}/.ephemera/deploy-$(date +%Y%m%d-%H%M%S).log}"
+DEPLOY_LOG="${FLUXVM_DEPLOY_LOG:-${HOME}/.fluxvm/deploy-$(date +%Y%m%d-%H%M%S).log}"
 
 QUICK_MODE=false
 UNINSTALL=false
@@ -33,12 +33,12 @@ BUILD_LOCAL=false
 VERIFY_ONLY=false
 PREFLIGHT_ONLY=false
 VERBOSE=false
-SSH_RETRIES="${EPHEMERA_SSH_RETRIES:-3}"
+SSH_RETRIES="${FLUXVM_SSH_RETRIES:-3}"
 POSITIONAL=()
 
 usage() {
     cat <<EOF
-Zyvor Ephemera remote deploy v${VERSION}
+Zyvor FluxVM remote deploy v${VERSION}
 
 Usage:
   $0 <host> <user> [options]
@@ -47,7 +47,7 @@ Usage:
 Profiles:
   (default)     Full remote build + system deps (qemu, cloud-utils)
   --quick       Rsync + cargo build on remote (skip dep install)
-  --quick --build-local   Install locally built target/release/ephemera (Linux only)
+  --quick --build-local   Install locally built target/release/fluxvm (Linux only)
 
 Options:
   --help              Show this help
@@ -58,13 +58,13 @@ Options:
   --skip-verify       Skip remote preflight check
   --build-local       With --quick: use local release binary (Linux host required)
   --key               SSH key auth (clear password)
-  --uninstall         Remove ephemera from host
+  --uninstall         Remove fluxvm from host
   -v, --verbose       Verbose rsync
 
 Environment:
-  EPHEMERA_DEPLOY_LOG    Log file path
-  EPHEMERA_SSH_RETRIES   SSH retry count (default: 3)
-  DEPLOY_DIR             Override remote staging dir (default: ~/.deployments/ephemera)
+  FLUXVM_DEPLOY_LOG    Log file path
+  FLUXVM_SSH_RETRIES   SSH retry count (default: 3)
+  DEPLOY_DIR             Override remote staging dir (default: ~/.deployments/fluxvm)
 
 Examples:
   $0 10.0.0.5 deploy --key
@@ -131,7 +131,7 @@ profile_label() {
 
 print_banner() {
     echo ""
-    echo "${C_CYAN}${C_BOLD}  == Zyvor Ephemera Remote Deploy v${VERSION} ==${C_RST}"
+    echo "${C_CYAN}${C_BOLD}  == Zyvor FluxVM Remote Deploy v${VERSION} ==${C_RST}"
     echo "  target: ${C_BOLD}${TARGET_USER}@${TARGET_HOST}${C_RST}  profile: $(profile_label)"
     [ "$DRY_RUN" = true ] && echo "${C_MAG}  DRY-RUN — no remote changes${C_RST}"
     echo ""
@@ -200,7 +200,7 @@ _rsync() {
 
 validate() {
     [ -n "${TARGET_HOST}" ] || { usage; exit 1; }
-    [ -f "${PROJECT_DIR}/Cargo.toml" ] || fail "Not in ephemera repo: ${PROJECT_DIR}"
+    [ -f "${PROJECT_DIR}/Cargo.toml" ] || fail "Not in fluxvm repo: ${PROJECT_DIR}"
     if [ -n "${TARGET_PASS}" ]; then
         warn "Password auth is deprecated. Prefer: ssh-copy-id ${TARGET_USER}@${TARGET_HOST}"
         command -v sshpass &>/dev/null || fail "sshpass required for password auth (dnf/apt install sshpass)"
@@ -210,7 +210,7 @@ validate() {
 check_connectivity() {
     info "SSH -> ${TARGET_USER}@${TARGET_HOST}  log: ${DEPLOY_LOG}"
     if [ "$DRY_RUN" = true ]; then
-        REMOTE_DIR="${DEPLOY_DIR:-${HOME}/.deployments/ephemera}"
+        REMOTE_DIR="${DEPLOY_DIR:-${HOME}/.deployments/fluxvm}"
         return 0
     fi
     _ssh "echo ok" &>/dev/null || fail "SSH failed — try: ssh-copy-id ${TARGET_USER}@${TARGET_HOST}"
@@ -218,7 +218,7 @@ check_connectivity() {
     local remote_home
     remote_home=$(_ssh "echo \$HOME" 2>/dev/null | tr -d '\r')
     remote_home="${remote_home:-/home/${TARGET_USER}}"
-    REMOTE_DIR="${DEPLOY_DIR:-${remote_home}/.deployments/ephemera}"
+    REMOTE_DIR="${DEPLOY_DIR:-${remote_home}/.deployments/fluxvm}"
     info "Remote path: ${REMOTE_DIR}"
 }
 
@@ -235,7 +235,7 @@ echo "  disk: $(df -h / 2>/dev/null | awk 'NR==2{print $4 " free on " $1}' || ec
 if [ -e /dev/kvm ]; then
     echo "  kvm:  /dev/kvm present"
 else
-    echo "  WARNING: /dev/kvm missing — enable virtualization or ephemera VMs will fail to launch"
+    echo "  WARNING: /dev/kvm missing — enable virtualization or fluxvm VMs will fail to launch"
 fi
 AVAIL=$(df -BG / 2>/dev/null | awk 'NR==2{gsub(/G/,"",$4); print $4}' || echo 99)
 if [ "${AVAIL}" -lt 4 ] 2>/dev/null; then
@@ -258,14 +258,14 @@ REMOTE
 build_local_artifacts() {
     step_begin "Local build (release)"
     if [ "$DRY_RUN" = true ]; then
-        dry "would run: cargo build --release -p ephemera-cli -p ephemera-guest-agent"
+        dry "would run: cargo build --release -p fluxvm-cli -p fluxvm-guest-agent"
         return 0
     fi
     if [ "$(uname -s)" != "Linux" ]; then
         fail "--build-local requires a Linux build host (same arch as remote). Use full deploy without --build-local."
     fi
-    (cd "${PROJECT_DIR}" && cargo build --release -p ephemera-cli -p ephemera-guest-agent)
-    [ -f "${PROJECT_DIR}/target/release/ephemera" ] || fail "target/release/ephemera missing"
+    (cd "${PROJECT_DIR}" && cargo build --release -p fluxvm-cli -p fluxvm-guest-agent)
+    [ -f "${PROJECT_DIR}/target/release/fluxvm" ] || fail "target/release/fluxvm missing"
     ok "Local binary ready"
     step_end
 }
@@ -285,8 +285,8 @@ sync_files() {
     _rsync "${excludes[@]}" "${PROJECT_DIR}/" "${TARGET_USER}@${TARGET_HOST}:${REMOTE_DIR}/"
     ok "Source synced to ${REMOTE_DIR}"
 
-    # ephemera-image depends on guestkit via a relative sibling path
-    # (../../../guestkit from crates/ephemera-image) — it has to land at the
+    # fluxvm-image depends on guestkit via a relative sibling path
+    # (../../../guestkit from crates/fluxvm-image) — it has to land at the
     # same relative depth next to REMOTE_DIR for that path dependency to
     # resolve on the remote host.
     local guestkit_local="${PROJECT_DIR}/../guestkit"
@@ -297,17 +297,17 @@ sync_files() {
         _rsync --exclude '.git' --exclude 'target' "${guestkit_local}/" "${TARGET_USER}@${TARGET_HOST}:${guestkit_remote}/"
         ok "guestkit (sibling path dependency) synced to ${guestkit_remote}"
     else
-        warn "no sibling guestkit checkout found at ${guestkit_local} — the build will fail if ephemera-image needs it"
+        warn "no sibling guestkit checkout found at ${guestkit_local} — the build will fail if fluxvm-image needs it"
     fi
 }
 
 sync_binary_only() {
-    local bin="${PROJECT_DIR}/target/release/ephemera"
+    local bin="${PROJECT_DIR}/target/release/fluxvm"
     [ -f "$bin" ] || fail "Missing $bin — run with --build-local after building on Linux"
     _ssh "mkdir -p '${REMOTE_DIR}/bin'"
-    _rsync "$bin" "${TARGET_USER}@${TARGET_HOST}:${REMOTE_DIR}/bin/ephemera"
+    _rsync "$bin" "${TARGET_USER}@${TARGET_HOST}:${REMOTE_DIR}/bin/fluxvm"
     _rsync "${PROJECT_DIR}/config.example.toml" "${TARGET_USER}@${TARGET_HOST}:${REMOTE_DIR}/config.example.toml"
-    _rsync "${PROJECT_DIR}/systemd/ephemera.service" "${TARGET_USER}@${TARGET_HOST}:${REMOTE_DIR}/ephemera.service"
+    _rsync "${PROJECT_DIR}/systemd/fluxvm.service" "${TARGET_USER}@${TARGET_HOST}:${REMOTE_DIR}/fluxvm.service"
     ok "Release binary synced"
 }
 
@@ -345,7 +345,7 @@ else
         iproute gcc make openssl-devel pkg-config curl git
 fi
 
-# guestkit (used by `ephemera build-image`'s image customization) mounts
+# guestkit (used by `fluxvm build-image`'s image customization) mounts
 # qcow2/raw images via qemu-nbd, which needs the nbd kernel module loaded.
 $SUDO modprobe nbd max_part=16 2>/dev/null || echo "WARN: modprobe nbd failed — image customization will not work until the nbd module is loaded" >&2
 
@@ -382,12 +382,12 @@ SUDO=""
 [ "$(id -u)" -ne 0 ] && SUDO="sudo"
 source "$HOME/.cargo/env" 2>/dev/null || true
 cd "${REMOTE_STAGING}"
-cargo build --release -p ephemera-cli -p ephemera-guest-agent 2>&1 | tail -8
-$SUDO install -m755 target/release/ephemera /usr/local/bin/ephemera
-[ -f /etc/ephemera.toml ] || $SUDO install -m644 config.example.toml /etc/ephemera.toml
-$SUDO install -m644 systemd/ephemera.service /etc/systemd/system/ephemera.service
+cargo build --release -p fluxvm-cli -p fluxvm-guest-agent 2>&1 | tail -8
+$SUDO install -m755 target/release/fluxvm /usr/local/bin/fluxvm
+[ -f /etc/fluxvm.toml ] || $SUDO install -m644 config.example.toml /etc/fluxvm.toml
+$SUDO install -m644 systemd/fluxvm.service /etc/systemd/system/fluxvm.service
 $SUDO systemctl daemon-reload 2>/dev/null || true
-echo "Installed: $(ephemera --version 2>/dev/null || echo ok)"
+echo "Installed: $(fluxvm --version 2>/dev/null || echo ok)"
 REMOTE
 }
 
@@ -396,11 +396,11 @@ install_binary_quick() {
 set -e
 SUDO=""
 [ "$(id -u)" -ne 0 ] && SUDO="sudo"
-$SUDO install -m755 "${REMOTE_STAGING}/bin/ephemera" /usr/local/bin/ephemera
-[ -f /etc/ephemera.toml ] || $SUDO install -m644 "${REMOTE_STAGING}/config.example.toml" /etc/ephemera.toml
-$SUDO install -m644 "${REMOTE_STAGING}/ephemera.service" /etc/systemd/system/ephemera.service
+$SUDO install -m755 "${REMOTE_STAGING}/bin/fluxvm" /usr/local/bin/fluxvm
+[ -f /etc/fluxvm.toml ] || $SUDO install -m644 "${REMOTE_STAGING}/config.example.toml" /etc/fluxvm.toml
+$SUDO install -m644 "${REMOTE_STAGING}/fluxvm.service" /etc/systemd/system/fluxvm.service
 $SUDO systemctl daemon-reload 2>/dev/null || true
-echo "Installed: $(ephemera --version 2>/dev/null || echo ok)"
+echo "Installed: $(fluxvm --version 2>/dev/null || echo ok)"
 REMOTE
 }
 
@@ -409,8 +409,8 @@ REMOTE
 # indefinitely (found live: a VM's QEMU command line was still missing a
 # flag added hours after that VM's daemon was last restarted). Safe to do
 # unconditionally on every deploy: the unit's `KillMode=process` (see
-# systemd/ephemera.service) means `restart` only replaces the tracked
-# ephemera PID -- QEMU children are left alone and `reconcile()` reattaches
+# systemd/fluxvm.service) means `restart` only replaces the tracked
+# fluxvm PID -- QEMU children are left alone and `reconcile()` reattaches
 # to them by their stored PID on the next `serve` startup, so already
 # -running VMs are not disrupted.
 restart_service() {
@@ -422,8 +422,8 @@ SUDO=""
 # an existing bridge) refuses to attach to ANY bridge without an explicit
 # allow-list here, regardless of caller privilege -- found live: hotplug-nic
 # failed with "bridge helper failed" against a real, existing bridge purely
-# because this file didn't exist. `ephemera` already runs as root with
-# CAP_NET_ADMIN (see systemd/ephemera.service), so this check adds no real
+# because this file didn't exist. `fluxvm` already runs as root with
+# CAP_NET_ADMIN (see systemd/fluxvm.service), so this check adds no real
 # isolation on top of that -- `allow all` matches the trust boundary that
 # already exists rather than requiring a hand-maintained list that would
 # drift from the bridges zyvor-fabric's networking crate creates dynamically.
@@ -432,17 +432,17 @@ if [ ! -f /etc/qemu/bridge.conf ]; then
     printf 'allow all\n' | $SUDO tee /etc/qemu/bridge.conf >/dev/null
     echo "Created /etc/qemu/bridge.conf (allow all)"
 fi
-$SUDO systemctl enable ephemera 2>/dev/null || true
-$SUDO systemctl restart ephemera
+$SUDO systemctl enable fluxvm 2>/dev/null || true
+$SUDO systemctl restart fluxvm
 for i in 1 2 3 4 5; do
-    $SUDO systemctl is-active --quiet ephemera && break
+    $SUDO systemctl is-active --quiet fluxvm && break
     sleep 1
 done
-if $SUDO systemctl is-active --quiet ephemera; then
-    echo "ephemera service restarted and active"
+if $SUDO systemctl is-active --quiet fluxvm; then
+    echo "fluxvm service restarted and active"
 else
-    echo "ERROR: ephemera did not become active after restart" >&2
-    $SUDO systemctl status ephemera --no-pager 2>&1 | tail -20 >&2
+    echo "ERROR: fluxvm did not become active after restart" >&2
+    $SUDO systemctl status fluxvm --no-pager 2>&1 | tail -20 >&2
     exit 1
 fi
 REMOTE
@@ -457,7 +457,7 @@ verify_remote() {
     if _ssh_once "bash '${REMOTE_DIR}/scripts/preflight.sh'"; then
         ok "preflight passed"
     else
-        warn "preflight reported missing tools (ephemera is installed; see above)"
+        warn "preflight reported missing tools (fluxvm is installed; see above)"
         return 0
     fi
 }
@@ -467,11 +467,11 @@ do_uninstall() {
 set -e
 SUDO=""
 [ "$(id -u)" -ne 0 ] && SUDO="sudo"
-$SUDO systemctl stop ephemera 2>/dev/null || true
-$SUDO systemctl disable ephemera 2>/dev/null || true
-$SUDO rm -f /usr/local/bin/ephemera /etc/systemd/system/ephemera.service
+$SUDO systemctl stop fluxvm 2>/dev/null || true
+$SUDO systemctl disable fluxvm 2>/dev/null || true
+$SUDO rm -f /usr/local/bin/fluxvm /etc/systemd/system/fluxvm.service
 rm -rf "${REMOTE_STAGING}"
-echo "ephemera removed (config /etc/ephemera.toml and /var/lib/ephemera left in place)"
+echo "fluxvm removed (config /etc/fluxvm.toml and /var/lib/fluxvm left in place)"
 REMOTE
     ok "Uninstalled on ${TARGET_HOST}"
 }
@@ -504,8 +504,8 @@ print_deployment_summary() {
     echo "  remote:  ${REMOTE_DIR}"
     echo ""
     echo "  ssh ${TARGET_USER}@${TARGET_HOST}"
-    echo "  systemctl status ephemera"
-    echo "  ephemera --config /etc/ephemera.toml create --spec examples/qemu.json"
+    echo "  systemctl status fluxvm"
+    echo "  fluxvm --config /etc/fluxvm.toml create --spec examples/qemu.json"
     echo "  bash ${REMOTE_DIR}/scripts/preflight.sh"
     echo ""
 }
@@ -522,7 +522,7 @@ main() {
     fi
 
     if [ "$UNINSTALL" = true ]; then
-        run_step "Uninstall ephemera" do_uninstall
+        run_step "Uninstall fluxvm" do_uninstall
         exit 0
     fi
 

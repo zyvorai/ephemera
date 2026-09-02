@@ -2,15 +2,15 @@
 # Copyright 2026 Zyvor
 # SPDX-License-Identifier: Apache-2.0
 
-# Real-hardware regression test for `ephemera build-image`'s guestkit-based
-# customization path (ephemera_image::customize_image) — every field of
+# Real-hardware regression test for `fluxvm build-image`'s guestkit-based
+# customization path (fluxvm_image::customize_image) — every field of
 # BuildImageRequest that mutates the guest filesystem: hostname, packages,
 # commands, ssh_key, copy_in, enable_services. No libguestfs/virt-customize
 # involved; this mounts the base image via qemu-nbd + chroot, exactly what
-# `ephemera build-image` itself does.
+# `fluxvm build-image` itself does.
 #
 # Proves:
-# - `ephemera build-image` accepts a spec exercising every customization
+# - `fluxvm build-image` accepts a spec exercising every customization
 #   field at once and exits 0
 # - hostname is written into /etc/hostname
 # - packages actually installs a real package via the guest's own package
@@ -30,7 +30,7 @@
 # with all qualify).
 #
 # Usage:
-#   sudo ./scripts/test-image-customize.sh --image /var/lib/ephemera/images/ubuntu-noble.qcow2
+#   sudo ./scripts/test-image-customize.sh --image /var/lib/fluxvm/images/ubuntu-noble.qcow2
 #
 # The base image's distro determines which package-manager branch of
 # install_packages() actually runs (apt-get/dnf/tdnf/yum/pacman, detected
@@ -64,14 +64,14 @@ done
 command -v qemu-nbd >/dev/null 2>&1 || { echo "qemu-nbd not found on PATH" >&2; exit 1; }
 modprobe nbd max_part=16 2>/dev/null || true
 
-EPH="${EPHEMERA_BIN:-}"
+EPH="${FLUXVM_BIN:-}"
 if [ -z "$EPH" ]; then
-    if [ -x "${PROJECT_DIR}/target/release/ephemera" ]; then
-        EPH="${PROJECT_DIR}/target/release/ephemera"
-    elif command -v ephemera >/dev/null 2>&1; then
-        EPH="$(command -v ephemera)"
+    if [ -x "${PROJECT_DIR}/target/release/fluxvm" ]; then
+        EPH="${PROJECT_DIR}/target/release/fluxvm"
+    elif command -v fluxvm >/dev/null 2>&1; then
+        EPH="$(command -v fluxvm)"
     else
-        echo "ephemera binary not found. Build it (cargo build --release -p ephemera-cli) or set EPHEMERA_BIN." >&2
+        echo "fluxvm binary not found. Build it (cargo build --release -p fluxvm-cli) or set FLUXVM_BIN." >&2
         exit 1
     fi
 fi
@@ -98,29 +98,29 @@ BASE_COPY="${TMP}/base.qcow2"
 OUT_IMAGE="${TMP}/out.qcow2"
 cp "$IMAGE" "$BASE_COPY"
 
-SSH_KEY_PUB="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINtestNotARealKeyUsedOnlyByThisRegressionTestXX test@ephemera-regression"
+SSH_KEY_PUB="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINtestNotARealKeyUsedOnlyByThisRegressionTestXX test@fluxvm-regression"
 COPY_IN_SRC="${TMP}/copyfile.txt"
-echo "ephemera build-image regression marker" > "$COPY_IN_SRC"
+echo "fluxvm build-image regression marker" > "$COPY_IN_SRC"
 
 cat > "${TMP}/spec.json" <<JSON
 {
   "source": "${BASE_COPY}",
   "output": "${OUT_IMAGE}",
   "format": "qcow2",
-  "hostname": "ephemera-customize-test",
+  "hostname": "fluxvm-customize-test",
   "packages": ["${TEST_PACKAGE}"],
-  "commands": ["touch /etc/ephemera-customize-test-marker"],
+  "commands": ["touch /etc/fluxvm-customize-test-marker"],
   "ssh_key": "${SSH_KEY_PUB}",
-  "copy_in": [{"src": "${COPY_IN_SRC}", "dest": "/etc/ephemera-customize-test-copyfile.txt"}],
+  "copy_in": [{"src": "${COPY_IN_SRC}", "dest": "/etc/fluxvm-customize-test-copyfile.txt"}],
   "enable_services": ["${TEST_SERVICE}"]
 }
 JSON
 
 section "build-image applies every customization field in one pass"
 if "$EPH" build-image --spec "${TMP}/spec.json" > "${TMP}/build.log" 2>&1; then
-    pass "ephemera build-image exited 0"
+    pass "fluxvm build-image exited 0"
 else
-    fail "ephemera build-image failed"
+    fail "fluxvm build-image failed"
     cat "${TMP}/build.log" >&2
     exit 1
 fi
@@ -142,7 +142,7 @@ mountpoint -q "$MOUNT_DIR" || { echo "could not find/mount the root partition on
 pass "mounted root partition /dev/${ROOT_PART}"
 
 section "hostname"
-if [ "$(cat "${MOUNT_DIR}/etc/hostname" 2>/dev/null)" = "ephemera-customize-test" ]; then
+if [ "$(cat "${MOUNT_DIR}/etc/hostname" 2>/dev/null)" = "fluxvm-customize-test" ]; then
     pass "/etc/hostname was rewritten"
 else
     fail "/etc/hostname does not match (got: $(cat "${MOUNT_DIR}/etc/hostname" 2>/dev/null || echo '<missing>'))"
@@ -156,14 +156,14 @@ else
 fi
 
 section "commands"
-if [ -e "${MOUNT_DIR}/etc/ephemera-customize-test-marker" ]; then
+if [ -e "${MOUNT_DIR}/etc/fluxvm-customize-test-marker" ]; then
     pass "commands entry actually ran"
 else
     fail "command-created marker file is missing"
 fi
 
 section "copy_in"
-if [ "$(cat "${MOUNT_DIR}/etc/ephemera-customize-test-copyfile.txt" 2>/dev/null)" = "ephemera build-image regression marker" ]; then
+if [ "$(cat "${MOUNT_DIR}/etc/fluxvm-customize-test-copyfile.txt" 2>/dev/null)" = "fluxvm build-image regression marker" ]; then
     pass "copy_in placed the exact file contents"
 else
     fail "copy_in destination file missing or wrong content"

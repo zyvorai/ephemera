@@ -1,4 +1,4 @@
-# Ephemera — Customer Documentation
+# FluxVM — Customer Documentation
 
 A standalone, minimal-dependency disposable-VM control plane — QEMU/KVM, Cloud Hypervisor, and Firecracker behind one API.
 
@@ -22,11 +22,11 @@ node scripts/customer-docs/build-customer-pdfs.mjs
 
 Output lands in [`pdf/`](pdf/):
 
-- `Ephemera-Customer-README.pdf`
-- `Ephemera-Getting-Started.pdf`
-- `Ephemera-Page-by-Page.pdf`
-- `Ephemera-Admin-Basics.pdf`
+- `FluxVM-Customer-README.pdf`
+- `FluxVM-Getting-Started.pdf`
+- `FluxVM-Page-by-Page.pdf`
+- `FluxVM-Admin-Basics.pdf`
 
 Also available: [using the CLI & API](using-the-dashboard.md).
 
-**→ Product page:** https://zyvor.dev/ephemera · **GitHub:** https://github.com/zyvorai/ephemera
+**→ Product page:** https://zyvor.dev/fluxvm · **GitHub:** https://github.com/zyvorai/fluxvm

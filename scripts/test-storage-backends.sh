@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Real-hardware regression test for the pluggable storage-provisioning
-# abstraction (ephemera_core::model::StorageBackend,
-# ephemera_image::storage). Boots real VMs against two of its three new
+# abstraction (fluxvm_core::model::StorageBackend,
+# fluxvm_image::storage). Boots real VMs against two of its three new
 # backends:
 #
 # - storage=lvm-thin: `image` is a real /dev/<vg>/<lv> thin LV. Proves a
@@ -19,7 +19,7 @@
 #   pid) only on delete, not on stop.
 # - storage=ceph-rbd is NOT covered here: it needs a real Ceph cluster, none
 #   of which is available in this test environment. See
-#   model::StorageBackend::CephRbd and ephemera_image::storage for the
+#   model::StorageBackend::CephRbd and fluxvm_image::storage for the
 #   implemented-but-unverified code path.
 #
 # Also proves two fail-closed cases: storage=nbd is rejected up front for a
@@ -30,7 +30,7 @@
 #
 # Usage:
 #   sudo ./scripts/test-storage-backends.sh \
-#       --image /var/lib/ephemera/images/ephemera-catalog-test.qcow2 \
+#       --image /var/lib/fluxvm/images/fluxvm-catalog-test.qcow2 \
 #       --lvm-vg ephtest --lvm-base-lv base
 #
 # The LVM thin pool + base LV must already exist (this script does not
@@ -71,14 +71,14 @@ done
 BASE_LV_DEV="/dev/${LVM_VG}/${LVM_BASE_LV}"
 [ -e "$BASE_LV_DEV" ] || { echo "$BASE_LV_DEV does not exist — set up the thin pool + base LV first (see --help)" >&2; exit 1; }
 
-EPH="${EPHEMERA_BIN:-}"
+EPH="${FLUXVM_BIN:-}"
 if [ -z "$EPH" ]; then
-    if command -v ephemera >/dev/null 2>&1; then
-        EPH="$(command -v ephemera)"
-    elif [ -x "${PROJECT_DIR}/target/release/ephemera" ]; then
-        EPH="${PROJECT_DIR}/target/release/ephemera"
+    if command -v fluxvm >/dev/null 2>&1; then
+        EPH="$(command -v fluxvm)"
+    elif [ -x "${PROJECT_DIR}/target/release/fluxvm" ]; then
+        EPH="${PROJECT_DIR}/target/release/fluxvm"
     else
-        echo "ephemera binary not found. Build it (cargo build --release -p ephemera-cli) or set EPHEMERA_BIN." >&2
+        echo "fluxvm binary not found. Build it (cargo build --release -p fluxvm-cli) or set FLUXVM_BIN." >&2
         exit 1
     fi
 fi
@@ -94,7 +94,7 @@ TMP="$(mktemp -d)"
 ID=""
 SERVE_PID=""
 cleanup() {
-    [ -n "$ID" ] && "$EPH" --config "${TMP}/ephemera.toml" delete "$ID" >/dev/null 2>&1 || true
+    [ -n "$ID" ] && "$EPH" --config "${TMP}/fluxvm.toml" delete "$ID" >/dev/null 2>&1 || true
     [ -n "$SERVE_PID" ] && { kill "$SERVE_PID" >/dev/null 2>&1 || true; wait "$SERVE_PID" 2>/dev/null || true; }
     # Best-effort: in case a test failed before its own delete ran.
     for lv in $(sudo lvs --noheadings -o lv_name "$LVM_VG" 2>/dev/null | tr -d ' ' | grep '^eph-' || true); do
@@ -110,13 +110,13 @@ json_field() { python3 -c "import json,sys;v=json.load(sys.stdin).get('$1');prin
 wait_exec() {
     local id="$1" attempts="${2:-30}"
     for _ in $(seq 1 "$attempts"); do
-        if "$EPH" --config "${TMP}/ephemera.toml" exec "$id" -- echo ok >/dev/null 2>&1; then return 0; fi
+        if "$EPH" --config "${TMP}/fluxvm.toml" exec "$id" -- echo ok >/dev/null 2>&1; then return 0; fi
         sleep 4
     done
     return 1
 }
 
-cat > "${TMP}/ephemera.toml" <<TOML
+cat > "${TMP}/fluxvm.toml" <<TOML
 listen = "127.0.0.1:17798"
 state_dir = "${TMP}/state"
 run_dir = "${TMP}/run"
@@ -138,7 +138,7 @@ section "storage=lvm-thin: a real thin snapshot LV is created and boots"
 cat > "${TMP}/vm-lvm.json" <<JSON
 {"name":"storage-lvm","backend":"qemu","image":"${BASE_LV_DEV}","vcpus":1,"memory_mib":768,"network":{"mode":"none"},"agent":{"enabled":true,"port":17777},"ttl_seconds":300,"storage":"lvm-thin"}
 JSON
-OUT=$("$EPH" --config "${TMP}/ephemera.toml" create --spec "${TMP}/vm-lvm.json")
+OUT=$("$EPH" --config "${TMP}/fluxvm.toml" create --spec "${TMP}/vm-lvm.json")
 ID=$(echo "$OUT" | json_field id)
 DISK=$(echo "$OUT" | json_field disk)
 [ -n "$ID" ] && pass "VM created with storage=lvm-thin" || fail "create with storage=lvm-thin failed"
@@ -159,7 +159,7 @@ if wait_exec "$ID" 30; then
 else
     fail "guest never became reachable when booted from an LVM thin snapshot"
 fi
-"$EPH" --config "${TMP}/ephemera.toml" delete "$ID"
+"$EPH" --config "${TMP}/fluxvm.toml" delete "$ID"
 if sudo lvs "${LVM_VG}/${SNAP_LV}" >/dev/null 2>&1; then
     fail "snapshot LV ${LVM_VG}/${SNAP_LV} still exists after delete — leaked"
 else
@@ -171,10 +171,10 @@ section "storage=nbd: the disk is really served over a qemu-nbd export"
 cat > "${TMP}/vm-nbd.json" <<JSON
 {"name":"storage-nbd","backend":"qemu","image":"${IMAGE}","vcpus":1,"memory_mib":768,"network":{"mode":"none"},"agent":{"enabled":true,"port":17777},"ttl_seconds":300,"storage":"nbd"}
 JSON
-OUT=$("$EPH" --config "${TMP}/ephemera.toml" create --spec "${TMP}/vm-nbd.json")
+OUT=$("$EPH" --config "${TMP}/fluxvm.toml" create --spec "${TMP}/vm-nbd.json")
 ID=$(echo "$OUT" | json_field id)
 [ -n "$ID" ] && pass "VM created with storage=nbd" || fail "create with storage=nbd failed"
-GET_OUT=$("$EPH" --config "${TMP}/ephemera.toml" get "$ID")
+GET_OUT=$("$EPH" --config "${TMP}/fluxvm.toml" get "$ID")
 NBD_PID=$(echo "$GET_OUT" | json_field nbd_pid)
 WORKSPACE=$(echo "$GET_OUT" | json_field workspace)
 if [ -n "$NBD_PID" ] && sudo kill -0 "$NBD_PID" >/dev/null 2>&1; then
@@ -197,7 +197,7 @@ if wait_exec "$ID" 30; then
 else
     fail "guest never became reachable when booted over NBD"
 fi
-"$EPH" --config "${TMP}/ephemera.toml" delete "$ID"
+"$EPH" --config "${TMP}/fluxvm.toml" delete "$ID"
 if sudo kill -0 "$NBD_PID" >/dev/null 2>&1; then
     fail "qemu-nbd process ${NBD_PID} is still alive after delete — leaked"
 else
@@ -209,7 +209,7 @@ section "storage=nbd is rejected up front for a non-QEMU backend"
 cat > "${TMP}/vm-nbd-ch.json" <<JSON
 {"name":"storage-nbd-ch","backend":"cloud-hypervisor","image":"${IMAGE}","vcpus":1,"memory_mib":768,"network":{"mode":"none"},"ttl_seconds":300,"storage":"nbd"}
 JSON
-if "$EPH" --config "${TMP}/ephemera.toml" create --spec "${TMP}/vm-nbd-ch.json" > "${TMP}/nbd-ch-out.txt" 2>&1; then
+if "$EPH" --config "${TMP}/fluxvm.toml" create --spec "${TMP}/vm-nbd-ch.json" > "${TMP}/nbd-ch-out.txt" 2>&1; then
     fail "create with storage=nbd + backend=cloud-hypervisor should have been rejected but succeeded"
     ID=$(json_field id < "${TMP}/nbd-ch-out.txt")
 else
@@ -221,7 +221,7 @@ section "storage=lvm-thin is rejected up front under the Firecracker jailer"
 cat > "${TMP}/vm-lvm-jail.json" <<JSON
 {"name":"storage-lvm-jail","backend":"firecracker","image":"${BASE_LV_DEV}","kernel":"/nonexistent-kernel","vcpus":1,"memory_mib":768,"network":{"mode":"none"},"ttl_seconds":300,"storage":"lvm-thin"}
 JSON
-if "$EPH" --config "${TMP}/ephemera.toml" create --spec "${TMP}/vm-lvm-jail.json" > "${TMP}/lvm-jail-out.txt" 2>&1; then
+if "$EPH" --config "${TMP}/fluxvm.toml" create --spec "${TMP}/vm-lvm-jail.json" > "${TMP}/lvm-jail-out.txt" 2>&1; then
     fail "create with storage=lvm-thin under the jailer should have been rejected but succeeded"
     ID=$(json_field id < "${TMP}/lvm-jail-out.txt")
 else
@@ -233,12 +233,12 @@ section "storage left unset (Default) still works exactly as before"
 cat > "${TMP}/vm-default.json" <<JSON
 {"name":"storage-default","backend":"qemu","image":"${IMAGE}","vcpus":1,"memory_mib":768,"network":{"mode":"none"},"ttl_seconds":300}
 JSON
-OUT=$("$EPH" --config "${TMP}/ephemera.toml" create --spec "${TMP}/vm-default.json")
+OUT=$("$EPH" --config "${TMP}/fluxvm.toml" create --spec "${TMP}/vm-default.json")
 ID=$(echo "$OUT" | json_field id)
 DISK=$(echo "$OUT" | json_field disk)
 [ -n "$ID" ] && pass "create with no storage field set still works (backward compatible)" || fail "create with storage unset broke"
 [[ "$DISK" == *.qcow2 ]] && pass "default storage still produces a qcow2 overlay" || fail "default storage disk '${DISK}' is not qcow2"
-"$EPH" --config "${TMP}/ephemera.toml" delete "$ID"
+"$EPH" --config "${TMP}/fluxvm.toml" delete "$ID"
 ID=""
 
 section "Summary"

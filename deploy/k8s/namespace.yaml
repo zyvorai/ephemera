@@ -3,4 +3,4 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: ephemera-system
+  name: fluxvm-system

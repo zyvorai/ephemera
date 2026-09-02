@@ -3,12 +3,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Real-hardware regression test for the image catalog + Ed25519 signing
-# (ephemera_image::catalog, `ephemera catalog keygen/sign`,
+# (fluxvm_image::catalog, `fluxvm catalog keygen/sign`,
 # GET /v1/images/catalog). Boots a real QEMU VM created by referencing a
 # catalog alias instead of a raw image path.
 #
 # Proves:
-# - `ephemera catalog keygen` produces a usable keypair, and `catalog sign`
+# - `fluxvm catalog keygen` produces a usable keypair, and `catalog sign`
 #   produces a verifiable signed entry
 # - creating a VM with `"image": "<catalog-name>"` actually resolves through
 #   the catalog and boots the real underlying image (verified via exec)
@@ -21,7 +21,7 @@
 #   backward compatible
 #
 # Usage:
-#   sudo ./scripts/test-image-catalog.sh --image /var/lib/ephemera/images/ephemera-lifecycle-test.qcow2
+#   sudo ./scripts/test-image-catalog.sh --image /var/lib/fluxvm/images/fluxvm-lifecycle-test.qcow2
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,17 +43,17 @@ done
 
 [ "$(uname -s)" = "Linux" ] || { echo "This test boots a real VM and requires a Linux/KVM host." >&2; exit 1; }
 [ -e /dev/kvm ] || { echo "/dev/kvm missing — enable virtualization first." >&2; exit 1; }
-[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — VM creation needs /var/lib/ephemera access." >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — VM creation needs /var/lib/fluxvm access." >&2; exit 1; }
 [ -n "$IMAGE" ] && [ -f "$IMAGE" ] || { echo "--image is required and must exist" >&2; exit 1; }
 
-EPH="${EPHEMERA_BIN:-}"
+EPH="${FLUXVM_BIN:-}"
 if [ -z "$EPH" ]; then
-    if command -v ephemera >/dev/null 2>&1; then
-        EPH="$(command -v ephemera)"
-    elif [ -x "${PROJECT_DIR}/target/release/ephemera" ]; then
-        EPH="${PROJECT_DIR}/target/release/ephemera"
+    if command -v fluxvm >/dev/null 2>&1; then
+        EPH="$(command -v fluxvm)"
+    elif [ -x "${PROJECT_DIR}/target/release/fluxvm" ]; then
+        EPH="${PROJECT_DIR}/target/release/fluxvm"
     else
-        echo "ephemera binary not found. Build it (cargo build --release -p ephemera-cli) or set EPHEMERA_BIN." >&2
+        echo "fluxvm binary not found. Build it (cargo build --release -p fluxvm-cli) or set FLUXVM_BIN." >&2
         exit 1
     fi
 fi
@@ -68,7 +68,7 @@ TMP="$(mktemp -d)"
 ID=""
 SERVE_PID=""
 cleanup() {
-    [ -n "$ID" ] && "$EPH" --config "${TMP}/ephemera.toml" delete "$ID" >/dev/null 2>&1 || true
+    [ -n "$ID" ] && "$EPH" --config "${TMP}/fluxvm.toml" delete "$ID" >/dev/null 2>&1 || true
     [ -n "$SERVE_PID" ] && { kill "$SERVE_PID" >/dev/null 2>&1 || true; wait "$SERVE_PID" 2>/dev/null || true; }
     rm -rf "$TMP"
 }
@@ -79,7 +79,7 @@ json_field() { python3 -c "import json,sys;v=json.load(sys.stdin).get('$1');prin
 wait_exec() {
     local id="$1" attempts="${2:-20}"
     for _ in $(seq 1 "$attempts"); do
-        if "$EPH" --config "${TMP}/ephemera.toml" exec "$id" -- echo ok >/dev/null 2>&1; then return 0; fi
+        if "$EPH" --config "${TMP}/fluxvm.toml" exec "$id" -- echo ok >/dev/null 2>&1; then return 0; fi
         sleep 4
     done
     return 1
@@ -107,7 +107,7 @@ else
     fail "catalog file missing the expected signed entry"
 fi
 
-cat > "${TMP}/ephemera.toml" <<TOML
+cat > "${TMP}/fluxvm.toml" <<TOML
 listen = "127.0.0.1:17799"
 state_dir = "${TMP}/state"
 run_dir = "${TMP}/run"
@@ -130,7 +130,7 @@ section "Create with an unsigned entry succeeds when trusted_signers is empty"
 cat > "${TMP}/vm-unsigned.json" <<JSON
 {"name":"catalog-unsigned","backend":"qemu","image":"test-image","vcpus":1,"memory_mib":768,"network":{"mode":"none"},"agent":{"enabled":true,"port":17777},"ttl_seconds":300}
 JSON
-OUT=$("$EPH" --config "${TMP}/ephemera.toml" create --spec "${TMP}/vm-unsigned.json")
+OUT=$("$EPH" --config "${TMP}/fluxvm.toml" create --spec "${TMP}/vm-unsigned.json")
 ID=$(echo "$OUT" | json_field id)
 [ -n "$ID" ] && pass "VM created by referencing the catalog alias 'test-image'" || fail "create via catalog alias failed"
 if wait_exec "$ID" 20; then
@@ -138,7 +138,7 @@ if wait_exec "$ID" 20; then
 else
     fail "guest never became reachable"
 fi
-"$EPH" --config "${TMP}/ephemera.toml" delete "$ID"
+"$EPH" --config "${TMP}/fluxvm.toml" delete "$ID"
 ID=""
 
 section "With trusted_signers set, an unsigned reference to the SAME name is rejected"
@@ -151,14 +151,14 @@ d.append({'name': 'unsigned-image', 'source': '${IMAGE}', 'sha256': '${SHA256}',
 json.dump(d, open('${TMP}/catalog.json', 'w'))
 "
 python3 -c "
-content = open('${TMP}/ephemera.toml').read()
+content = open('${TMP}/fluxvm.toml').read()
 content = content.replace('trusted_signers = []', 'trusted_signers = [\"${PUBLIC_KEY}\"]')
-open('${TMP}/ephemera.toml', 'w').write(content)
+open('${TMP}/fluxvm.toml', 'w').write(content)
 "
 cat > "${TMP}/vm-should-fail.json" <<JSON
 {"name":"catalog-should-fail","backend":"qemu","image":"unsigned-image","vcpus":1,"memory_mib":768,"network":{"mode":"none"},"ttl_seconds":300}
 JSON
-if "$EPH" --config "${TMP}/ephemera.toml" create --spec "${TMP}/vm-should-fail.json" > "${TMP}/should-fail-out.txt" 2>&1; then
+if "$EPH" --config "${TMP}/fluxvm.toml" create --spec "${TMP}/vm-should-fail.json" > "${TMP}/should-fail-out.txt" 2>&1; then
     fail "create with an unsigned entry succeeded even though trusted_signers is configured"
     ID=$(json_field id < "${TMP}/should-fail-out.txt")
 else
@@ -170,7 +170,7 @@ section "A validly signed entry is accepted with trusted_signers configured"
 cat > "${TMP}/vm-signed.json" <<JSON
 {"name":"catalog-signed","backend":"qemu","image":"test-image","vcpus":1,"memory_mib":768,"network":{"mode":"none"},"agent":{"enabled":true,"port":17777},"ttl_seconds":300}
 JSON
-OUT=$("$EPH" --config "${TMP}/ephemera.toml" create --spec "${TMP}/vm-signed.json")
+OUT=$("$EPH" --config "${TMP}/fluxvm.toml" create --spec "${TMP}/vm-signed.json")
 ID=$(echo "$OUT" | json_field id)
 [ -n "$ID" ] && pass "VM created via the signed catalog entry with trusted_signers enforced" || fail "create with a validly signed entry failed"
 if wait_exec "$ID" 20; then
@@ -178,25 +178,25 @@ if wait_exec "$ID" 20; then
 else
     fail "guest never became reachable"
 fi
-"$EPH" --config "${TMP}/ephemera.toml" delete "$ID"
+"$EPH" --config "${TMP}/fluxvm.toml" delete "$ID"
 ID=""
 
 section "A plain literal path (not in the catalog) still works unchanged"
 cat > "${TMP}/vm-literal.json" <<JSON
 {"name":"catalog-literal","backend":"qemu","image":"${IMAGE}","vcpus":1,"memory_mib":768,"network":{"mode":"none"},"ttl_seconds":300}
 JSON
-OUT=$("$EPH" --config "${TMP}/ephemera.toml" create --spec "${TMP}/vm-literal.json")
+OUT=$("$EPH" --config "${TMP}/fluxvm.toml" create --spec "${TMP}/vm-literal.json")
 ID=$(echo "$OUT" | json_field id)
 [ -n "$ID" ] && pass "create with a plain literal image path still works" || fail "create with a literal path broke"
-"$EPH" --config "${TMP}/ephemera.toml" delete "$ID"
+"$EPH" --config "${TMP}/fluxvm.toml" delete "$ID"
 ID=""
 
 section "GET /v1/images/catalog reports signature_valid correctly"
-"$EPH" --config "${TMP}/ephemera.toml" serve > "${TMP}/serve.log" 2>&1 &
+"$EPH" --config "${TMP}/fluxvm.toml" serve > "${TMP}/serve.log" 2>&1 &
 SERVE_PID=$!
 sleep 2
 if ! kill -0 "$SERVE_PID" 2>/dev/null; then
-    fail "ephemera serve failed to start (port ${BASE_URL} likely in use by something else) — see ${TMP}/serve.log"
+    fail "fluxvm serve failed to start (port ${BASE_URL} likely in use by something else) — see ${TMP}/serve.log"
     cat "${TMP}/serve.log" >&2 || true
     SERVE_PID=""
 fi

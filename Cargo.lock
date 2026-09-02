@@ -177,6 +177,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "arc-swap"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "array-init"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -730,6 +739,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "combine"
+version = "4.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfc320937d09e6de266b31b9afb480f197d7a861be86be7cb2ea7e5d1bfffc5e"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "memchr",
+ "pin-project-lite",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -1338,241 +1361,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ephemera-agent"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "chrono",
- "clap",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "ephemera-api"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-stream",
- "axum",
- "bytes",
- "chrono",
- "ephemera-core",
- "ephemera-image",
- "ephemera-scheduler",
- "ephemera-vsock-client",
- "futures",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tower",
- "tower-http",
- "uuid",
-]
-
-[[package]]
-name = "ephemera-cgroup"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
- "tempfile",
- "thiserror 2.0.20",
- "tracing",
-]
-
-[[package]]
-name = "ephemera-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "clap",
- "ephemera-api",
- "ephemera-core",
- "ephemera-image",
- "ephemera-scheduler",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "ephemera-cloud-hypervisor"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "ephemera-core",
-]
-
-[[package]]
-name = "ephemera-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "ephemera-cgroup",
- "libc",
- "serde",
- "serde_json",
- "tokio",
- "toml 0.9.12+spec-1.1.0",
- "uuid",
-]
-
-[[package]]
-name = "ephemera-firecracker"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "ephemera-core",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "ephemera-guest-agent"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "clap",
- "ephemera-guest-protocol",
- "libc",
- "tempfile",
-]
-
-[[package]]
-name = "ephemera-guest-protocol"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ephemera-image"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "ed25519-dalek",
- "ephemera-core",
- "ephemera-guest-protocol",
- "guestkit",
- "rand 0.8.7",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "ephemera-kube"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "futures",
- "k8s-openapi",
- "kube",
- "reqwest",
- "schemars",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "ephemera-network"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ephemera-core",
- "libc",
- "uuid",
-]
-
-[[package]]
-name = "ephemera-qemu"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "ephemera-core",
- "libc",
- "serde_json",
- "tempfile",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "ephemera-scheduler"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "ephemera-cgroup",
- "ephemera-cloud-hypervisor",
- "ephemera-core",
- "ephemera-firecracker",
- "ephemera-guest-protocol",
- "ephemera-image",
- "ephemera-network",
- "ephemera-qemu",
- "ephemera-storage",
- "ephemera-vsock-client",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ephemera-storage"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "ephemera-core",
- "libc",
- "serde_json",
- "tempfile",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "ephemera-vsock-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ephemera-core",
- "ephemera-guest-protocol",
- "libc",
- "tokio",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1706,6 +1494,272 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
+]
+
+[[package]]
+name = "fluxvm-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "clap",
+ "redis",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "fluxvm-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "axum",
+ "bytes",
+ "chrono",
+ "fluxvm-core",
+ "fluxvm-image",
+ "fluxvm-network",
+ "fluxvm-scheduler",
+ "fluxvm-vsock-client",
+ "futures",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tower-http",
+ "uuid",
+]
+
+[[package]]
+name = "fluxvm-cgroup"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "fluxvm-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "fluxvm-api",
+ "fluxvm-core",
+ "fluxvm-image",
+ "fluxvm-network",
+ "fluxvm-scheduler",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "fluxvm-cloud-hypervisor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "fluxvm-core",
+]
+
+[[package]]
+name = "fluxvm-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "fluxvm-cgroup",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml 0.9.12+spec-1.1.0",
+ "uuid",
+]
+
+[[package]]
+name = "fluxvm-firecracker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "fluxvm-core",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "fluxvm-guest-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "clap",
+ "fluxvm-guest-protocol",
+ "libc",
+ "tempfile",
+]
+
+[[package]]
+name = "fluxvm-guest-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fluxvm-hypervisor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "clap",
+ "fluxvm-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "fluxvm-image"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "ed25519-dalek",
+ "fluxvm-core",
+ "fluxvm-guest-protocol",
+ "guestkit",
+ "rand 0.8.7",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "fluxvm-kube"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures",
+ "k8s-openapi",
+ "kube",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "fluxvm-network"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "fluxvm-core",
+ "libc",
+ "reqwest",
+ "serde",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "fluxvm-qemu"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "fluxvm-core",
+ "libc",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "fluxvm-scheduler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "fluxvm-cgroup",
+ "fluxvm-cloud-hypervisor",
+ "fluxvm-core",
+ "fluxvm-firecracker",
+ "fluxvm-guest-protocol",
+ "fluxvm-hypervisor",
+ "fluxvm-image",
+ "fluxvm-network",
+ "fluxvm-qemu",
+ "fluxvm-storage",
+ "fluxvm-vsock-client",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "fluxvm-storage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "fluxvm-core",
+ "libc",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "fluxvm-vsock-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fluxvm-core",
+ "fluxvm-guest-protocol",
+ "libc",
+ "tokio",
 ]
 
 [[package]]
@@ -2193,7 +2247,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2",
+ "socket2 0.6.5",
  "tokio",
  "tower-service",
  "tracing",
@@ -3023,6 +3077,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-bigint"
+version = "0.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367"
+dependencies = [
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-conv"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3048,6 +3112,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "num-integer"
+version = "0.1.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -3422,7 +3495,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2",
+ "socket2 0.6.5",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -3460,7 +3533,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2",
+ "socket2 0.6.5",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -3635,6 +3708,32 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "redis"
+version = "0.27.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09d8f99a4090c89cc489a94833c901ead69bfbf3877b4867d5482e321ee875bc"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "backon",
+ "bytes",
+ "combine",
+ "futures",
+ "futures-util",
+ "itertools",
+ "itoa",
+ "num-bigint",
+ "percent-encoding",
+ "pin-project-lite",
+ "ryu",
+ "sha1_smol",
+ "socket2 0.5.10",
+ "tokio",
+ "tokio-util",
+ "url",
 ]
 
 [[package]]
@@ -4187,6 +4286,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4312,6 +4417,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "socket2"
+version = "0.5.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
+dependencies = [
+ "libc",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4665,7 +4780,7 @@ dependencies = [
  "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2",
+ "socket2 0.6.5",
  "tokio-macros",
  "windows-sys 0.61.2",
 ]

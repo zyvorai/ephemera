@@ -3,13 +3,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Real-hardware regression test for cgroup v2 resource control
-# (ephemera-cgroup, VmManager::set_resources/freeze/thaw/metrics/pressure).
+# (fluxvm-cgroup, VmManager::set_resources/freeze/thaw/metrics/pressure).
 # Boots a real QEMU VM and drives it entirely through the REST API against
-# a running `ephemera serve` daemon.
+# a running `fluxvm serve` daemon.
 #
 # Proves:
 # - a VM launched by `create` actually lands in its own cgroup
-#   (ephemera.slice/{id}.scope) — confirmed by reading the real cgroupfs,
+#   (fluxvm.slice/{id}.scope) — confirmed by reading the real cgroupfs,
 #   not just trusting the recorded cgroup_path
 # - POST .../resources actually constrains the process: a memory limit set
 #   low enough is really enforced by the kernel (cgroup.events reports an
@@ -20,20 +20,20 @@
 # - GET .../stats and .../pressure return real, non-placeholder data read
 #   from the cgroup's own accounting files
 # - delete removes the cgroup directory — no leftover empty
-#   ephemera.slice/{id}.scope after the VM is gone
+#   fluxvm.slice/{id}.scope after the VM is gone
 #
 # Usage:
-#   sudo ./scripts/test-cgroup-resources.sh --image /var/lib/ephemera/images/ephemera-lifecycle-test.qcow2
+#   sudo ./scripts/test-cgroup-resources.sh --image /var/lib/fluxvm/images/fluxvm-lifecycle-test.qcow2
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-CONFIG="/etc/ephemera.toml"
+CONFIG="/etc/fluxvm.toml"
 [ -f "$CONFIG" ] || CONFIG=""
 IMAGE=""
 BASE_URL="http://127.0.0.1:7788"
-CGROUP_ROOT="/sys/fs/cgroup/ephemera.slice"
+CGROUP_ROOT="/sys/fs/cgroup/fluxvm.slice"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -53,14 +53,14 @@ done
 [ -n "$IMAGE" ] && [ -f "$IMAGE" ] || { echo "--image is required and must exist" >&2; exit 1; }
 [ "$(stat -fc %T /sys/fs/cgroup 2>/dev/null)" = "cgroup2fs" ] || { echo "cgroup v2 (unified hierarchy) is required." >&2; exit 1; }
 
-EPH="${EPHEMERA_BIN:-}"
+EPH="${FLUXVM_BIN:-}"
 if [ -z "$EPH" ]; then
-    if command -v ephemera >/dev/null 2>&1; then
-        EPH="$(command -v ephemera)"
-    elif [ -x "${PROJECT_DIR}/target/release/ephemera" ]; then
-        EPH="${PROJECT_DIR}/target/release/ephemera"
+    if command -v fluxvm >/dev/null 2>&1; then
+        EPH="$(command -v fluxvm)"
+    elif [ -x "${PROJECT_DIR}/target/release/fluxvm" ]; then
+        EPH="${PROJECT_DIR}/target/release/fluxvm"
     else
-        echo "ephemera binary not found. Build it (cargo build --release -p ephemera-cli) or set EPHEMERA_BIN." >&2
+        echo "fluxvm binary not found. Build it (cargo build --release -p fluxvm-cli) or set FLUXVM_BIN." >&2
         exit 1
     fi
 fi
@@ -95,14 +95,14 @@ wait_exec() {
     return 1
 }
 
-section "Start a real 'ephemera serve' daemon"
+section "Start a real 'fluxvm serve' daemon"
 "$EPH" "${CFG_ARGS[@]}" serve > "${TMP}/serve.log" 2>&1 &
 SERVE_PID=$!
 sleep 2
 if kill -0 "$SERVE_PID" 2>/dev/null; then
-    pass "ephemera serve started (pid ${SERVE_PID})"
+    pass "fluxvm serve started (pid ${SERVE_PID})"
 else
-    fail "ephemera serve failed to start — see ${TMP}/serve.log"
+    fail "fluxvm serve failed to start — see ${TMP}/serve.log"
     cat "${TMP}/serve.log" >&2 || true
     exit 1
 fi
@@ -110,7 +110,7 @@ fi
 section "Create (QEMU, agent enabled)"
 cat > "${TMP}/vm.json" <<JSON
 {
-  "name": "ephemera-cgroup-test",
+  "name": "fluxvm-cgroup-test",
   "backend": "qemu",
   "image": "${IMAGE}",
   "vcpus": 1,

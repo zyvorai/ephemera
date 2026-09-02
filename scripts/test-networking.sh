@@ -2,7 +2,7 @@
 # Copyright 2026 Zyvor
 # SPDX-License-Identifier: Apache-2.0
 
-# End-to-end networking smoke test for Zyvor Ephemera: boots a real VM over
+# End-to-end networking smoke test for Zyvor FluxVM: boots a real VM over
 # each supported network mode and verifies it is actually reachable over SSH.
 #
 # Test 1 — QEMU user-mode NAT + host port forward (no host network changes).
@@ -17,13 +17,13 @@
 #           to rely on here) via a second, host-side macvtap sibling.
 #
 # All three also verify cleanup: the QEMU process and (for TAP/macvtap) the
-# tap/macvtap interface must be gone after `ephemera delete`.
+# tap/macvtap interface must be gone after `fluxvm delete`.
 #
 # Usage:
 #   sudo ./scripts/test-networking.sh [--bridge NAME] [--macvtap-parent NAME] [--image PATH] [--config PATH]
 #
 # Env:
-#   EPHEMERA_BIN   path to the ephemera binary (default: resolved from PATH or target/release)
+#   FLUXVM_BIN   path to the fluxvm binary (default: resolved from PATH or target/release)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,7 +32,7 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BRIDGE="vmbr0"
 MACVTAP_PARENT=""
 IMAGE=""
-CONFIG="/etc/ephemera.toml"
+CONFIG="/etc/fluxvm.toml"
 [ -f "$CONFIG" ] || CONFIG=""
 
 while [ $# -gt 0 ]; do
@@ -59,16 +59,16 @@ section() { echo ""; echo "=== $1 ==="; }
 
 [ "$(uname -s)" = "Linux" ] || { echo "This test boots real VMs and requires a Linux/KVM host." >&2; exit 1; }
 [ -e /dev/kvm ] || { echo "/dev/kvm missing — enable virtualization first." >&2; exit 1; }
-[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — VM creation needs CAP_NET_ADMIN and /var/lib/ephemera access." >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — VM creation needs CAP_NET_ADMIN and /var/lib/fluxvm access." >&2; exit 1; }
 
-EPH="${EPHEMERA_BIN:-}"
+EPH="${FLUXVM_BIN:-}"
 if [ -z "$EPH" ]; then
-    if command -v ephemera >/dev/null 2>&1; then
-        EPH="$(command -v ephemera)"
-    elif [ -x "${PROJECT_DIR}/target/release/ephemera" ]; then
-        EPH="${PROJECT_DIR}/target/release/ephemera"
+    if command -v fluxvm >/dev/null 2>&1; then
+        EPH="$(command -v fluxvm)"
+    elif [ -x "${PROJECT_DIR}/target/release/fluxvm" ]; then
+        EPH="${PROJECT_DIR}/target/release/fluxvm"
     else
-        echo "ephemera binary not found. Build it (cargo build --release -p ephemera-cli) or set EPHEMERA_BIN." >&2
+        echo "fluxvm binary not found. Build it (cargo build --release -p fluxvm-cli) or set FLUXVM_BIN." >&2
         exit 1
     fi
 fi
@@ -76,22 +76,22 @@ CFG_ARGS=()
 [ -n "$CONFIG" ] && CFG_ARGS=(--config "$CONFIG")
 eph() { "$EPH" "${CFG_ARGS[@]}" "$@"; }
 
-STATE_DIR="/var/lib/ephemera"
+STATE_DIR="/var/lib/fluxvm"
 if [ -n "$CONFIG" ]; then
     STATE_DIR=$(python3 -c "
 import tomllib
 with open('${CONFIG}', 'rb') as f:
-    print(tomllib.load(f).get('state_dir', '/var/lib/ephemera'))
-" 2>/dev/null || echo "/var/lib/ephemera")
+    print(tomllib.load(f).get('state_dir', '/var/lib/fluxvm'))
+" 2>/dev/null || echo "/var/lib/fluxvm")
 fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-ssh-keygen -t ed25519 -N "" -f "${TMP}/key" -C "ephemera-smoketest" >/dev/null
+ssh-keygen -t ed25519 -N "" -f "${TMP}/key" -C "fluxvm-smoketest" >/dev/null
 PUBKEY="$(cat "${TMP}/key.pub")"
 
 if [ -z "$IMAGE" ]; then
-    IMAGE="${STATE_DIR}/images/ephemera-smoketest.qcow2"
+    IMAGE="${STATE_DIR}/images/fluxvm-smoketest.qcow2"
     if [ ! -f "$IMAGE" ]; then
         section "Building a test image (Ubuntu 24.04 cloud image)"
         cat > "${TMP}/build.json" <<JSON
@@ -179,13 +179,13 @@ section "Test 1: QEMU user-mode NAT + host port forward"
 PORT=$(( (RANDOM % 5000) + 20000 ))
 cat > "${TMP}/user-net.json" <<JSON
 {
-  "name": "ephemera-nettest-user",
+  "name": "fluxvm-nettest-user",
   "backend": "qemu",
   "image": "${IMAGE}",
   "vcpus": 1,
   "memory_mib": 768,
   "network": {"mode": "user", "forwards": [{"host_port": ${PORT}, "guest_port": 22, "protocol": "tcp"}]},
-  "cloud_init": {"hostname": "ephemera-nettest-user", "user": "eph", "ssh_authorized_keys": ["${PUBKEY}"]},
+  "cloud_init": {"hostname": "fluxvm-nettest-user", "user": "eph", "ssh_authorized_keys": ["${PUBKEY}"]},
   "ttl_seconds": 300
 }
 JSON
@@ -198,13 +198,13 @@ else
     MAC=$(printf '52:54:00:%02x:%02x:%02x' $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256)))
     cat > "${TMP}/tap-net.json" <<JSON
 {
-  "name": "ephemera-nettest-tap",
+  "name": "fluxvm-nettest-tap",
   "backend": "qemu",
   "image": "${IMAGE}",
   "vcpus": 1,
   "memory_mib": 768,
   "network": {"mode": "tap", "bridge": "${BRIDGE}", "mac": "${MAC}"},
-  "cloud_init": {"hostname": "ephemera-nettest-tap", "user": "eph", "ssh_authorized_keys": ["${PUBKEY}"]},
+  "cloud_init": {"hostname": "fluxvm-nettest-tap", "user": "eph", "ssh_authorized_keys": ["${PUBKEY}"]},
   "ttl_seconds": 300
 }
 JSON
@@ -252,7 +252,7 @@ static_cmd = (
     "ip addr add " + os.environ["GUEST_IP"] + "/24 dev $IFACE; ip link set $IFACE up"
 )
 spec = {
-    "name": "ephemera-nettest-macvtap",
+    "name": "fluxvm-nettest-macvtap",
     "backend": "qemu",
     "image": os.environ["IMAGE"],
     "vcpus": 1,
@@ -264,7 +264,7 @@ spec = {
         "mac": os.environ["MAC"],
     },
     "cloud_init": {
-        "hostname": "ephemera-nettest-macvtap",
+        "hostname": "fluxvm-nettest-macvtap",
         "user": "eph",
         "ssh_authorized_keys": [os.environ["PUBKEY"]],
         "runcmd": [static_cmd],

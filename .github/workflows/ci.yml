@@ -9,14 +9,14 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-      # ephemera-image depends on the sibling `guestkit` project via a
-      # relative path (../../../guestkit from crates/ephemera-image), so it
+      # fluxvm-image depends on the sibling `guestkit` project via a
+      # relative path (../../../guestkit from crates/fluxvm-image), so it
       # has to land as an actual sibling directory here too, not nested
       # inside this checkout.
-      - name: Checkout ephemera
+      - name: Checkout fluxvm
         uses: actions/checkout@v4
         with:
-          path: ephemera
+          path: fluxvm
 
       - name: Checkout guestkit (sibling path dependency)
         uses: actions/checkout@v4
@@ -39,21 +39,21 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: ephemera
+          workspaces: fluxvm
 
       - name: cargo build --workspace
-        working-directory: ephemera
+        working-directory: fluxvm
         run: cargo build --workspace --all-targets
 
       - name: cargo test --workspace
-        working-directory: ephemera
+        working-directory: fluxvm
         run: cargo test --workspace
 
       - name: cargo clippy (informational — not a merge gate yet)
-        working-directory: ephemera
+        working-directory: fluxvm
         run: cargo clippy --workspace --all-targets || true
 
-  # Real-hardware regression test for `ephemera build-image`'s guestkit-based
+  # Real-hardware regression test for `fluxvm build-image`'s guestkit-based
   # customization path (see scripts/test-image-customize.sh) across every
   # package-manager branch install_packages() supports. Doesn't need KVM —
   # build-image never boots a VM, it mounts the image directly via
@@ -75,10 +75,10 @@ jobs:
             image_url: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
             test_service: sshd
     steps:
-      - name: Checkout ephemera
+      - name: Checkout fluxvm
         uses: actions/checkout@v4
         with:
-          path: ephemera
+          path: fluxvm
 
       - name: Checkout guestkit (sibling path dependency)
         uses: actions/checkout@v4
@@ -95,12 +95,12 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: ephemera
+          workspaces: fluxvm
           key: image-customize-${{ matrix.distro }}
 
-      - name: Build ephemera-cli + ephemera-image (release)
-        working-directory: ephemera
-        run: cargo build --release -p ephemera-cli -p ephemera-image
+      - name: Build fluxvm-cli + fluxvm-image (release)
+        working-directory: fluxvm
+        run: cargo build --release -p fluxvm-cli -p fluxvm-image
 
       # Base cloud images are 500MB+ and rarely change — cache by URL so
       # only the first run per distro per cache-eviction cycle pays for it.
@@ -119,9 +119,9 @@ jobs:
         run: sudo modprobe nbd max_part=16
 
       - name: Run test-image-customize.sh
-        working-directory: ephemera
+        working-directory: fluxvm
         env:
-          EPHEMERA_BIN: ${{ github.workspace }}/ephemera/target/release/ephemera
+          FLUXVM_BIN: ${{ github.workspace }}/fluxvm/target/release/fluxvm
           TEST_PACKAGE: tree
           TEST_SERVICE: ${{ matrix.test_service }}
         run: sudo -E ./scripts/test-image-customize.sh --image /tmp/base-image.qcow2

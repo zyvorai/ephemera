@@ -42,7 +42,7 @@ const THEMES = {
   Axiom: { accent: '#818cf8', grad: '#0f0a1a,#312e81,#0d1b2a', brandHtml: 'Axi<span>om</span>' },
   'Zyvor Fabric': { accent: '#2dd4bf', grad: '#042f2e,#115e59,#0d1b2a', brandHtml: 'Zyvor <span>Fabric</span>' },
   Hermes: { accent: '#fb7185', grad: '#1c0a12,#9f1239,#0d1b2a', brandHtml: 'Her<span>mes</span>' },
-  Ephemera: { accent: '#2dd4bf', grad: '#042f2e,#0f766e,#0d1b2a', brandHtml: 'Ephe<span>mera</span>' },
+  FluxVM: { accent: '#2dd4bf', grad: '#042f2e,#0f766e,#0d1b2a', brandHtml: 'Ephe<span>mera</span>' },
   Transiva: { accent: '#60a5fa', grad: '#0a0a1a,#1e3a5f,#0d1b2a', brandHtml: 'Tran<span>siva</span>' },
   ZySign: { accent: '#a3e635', grad: '#14532d,#365314,#0d1b2a', brandHtml: 'Zy<span>Sign</span>' },
 }

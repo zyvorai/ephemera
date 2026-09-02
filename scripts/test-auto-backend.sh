@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Real-hardware regression test for BackendKind::Auto resolution
-# (ephemera_scheduler::resolve_backend). Boots actual VMs — it does not just
+# (fluxvm_scheduler::resolve_backend). Boots actual VMs — it does not just
 # assert on the pure function, which is already covered by unit tests in
-# ephemera-scheduler/src/lib.rs.
+# fluxvm-scheduler/src/lib.rs.
 #
 # Cases:
 #   A. backend=auto, no kernel in request, no default kernel/firmware in
@@ -16,14 +16,14 @@
 #      vsock exec (UDS proxy path, not the QEMU native path A exercised).
 #   C. backend=auto, request supplies NO kernel, but config's
 #      firecracker_kernel default does -> resolves to firecracker from the
-#      config default alone. Temporarily edits /etc/ephemera.toml and
+#      config default alone. Temporarily edits /etc/fluxvm.toml and
 #      restores it afterward (even on failure, via trap).
 #
 # Usage:
 #   sudo ./scripts/test-auto-backend.sh \
-#       --qemu-image /var/lib/ephemera/images/ephemera-lifecycle-test.qcow2 \
-#       --fc-image /var/lib/ephemera/images/ubuntu-fc-root-agent.raw \
-#       --fc-kernel /var/lib/ephemera/kernels/vmlinux-fc
+#       --qemu-image /var/lib/fluxvm/images/fluxvm-lifecycle-test.qcow2 \
+#       --fc-image /var/lib/fluxvm/images/ubuntu-fc-root-agent.raw \
+#       --fc-kernel /var/lib/fluxvm/kernels/vmlinux-fc
 #
 # All three paths must already exist (built/extracted by earlier manual
 # Firecracker validation — see README's Firecracker section for how to
@@ -35,7 +35,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-CONFIG="/etc/ephemera.toml"
+CONFIG="/etc/fluxvm.toml"
 QEMU_IMAGE=""
 FC_IMAGE=""
 FC_KERNEL=""
@@ -56,19 +56,19 @@ done
 
 [ "$(uname -s)" = "Linux" ] || { echo "This test boots real VMs and requires a Linux/KVM host." >&2; exit 1; }
 [ -e /dev/kvm ] || { echo "/dev/kvm missing — enable virtualization first." >&2; exit 1; }
-[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — VM creation needs /var/lib/ephemera access." >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — VM creation needs /var/lib/fluxvm access." >&2; exit 1; }
 [ -n "$QEMU_IMAGE" ] && [ -f "$QEMU_IMAGE" ] || { echo "--qemu-image is required and must exist" >&2; exit 1; }
 [ -n "$FC_IMAGE" ] && [ -f "$FC_IMAGE" ] || { echo "--fc-image is required and must exist" >&2; exit 1; }
 [ -n "$FC_KERNEL" ] && [ -f "$FC_KERNEL" ] || { echo "--fc-kernel is required and must exist" >&2; exit 1; }
 
-EPH="${EPHEMERA_BIN:-}"
+EPH="${FLUXVM_BIN:-}"
 if [ -z "$EPH" ]; then
-    if command -v ephemera >/dev/null 2>&1; then
-        EPH="$(command -v ephemera)"
-    elif [ -x "${PROJECT_DIR}/target/release/ephemera" ]; then
-        EPH="${PROJECT_DIR}/target/release/ephemera"
+    if command -v fluxvm >/dev/null 2>&1; then
+        EPH="$(command -v fluxvm)"
+    elif [ -x "${PROJECT_DIR}/target/release/fluxvm" ]; then
+        EPH="${PROJECT_DIR}/target/release/fluxvm"
     else
-        echo "ephemera binary not found. Build it (cargo build --release -p ephemera-cli) or set EPHEMERA_BIN." >&2
+        echo "fluxvm binary not found. Build it (cargo build --release -p fluxvm-cli) or set FLUXVM_BIN." >&2
         exit 1
     fi
 fi
@@ -132,7 +132,7 @@ create_and_check() {
     # above both land in this window), but back-to-back Cases B and C in the
     # same run add real contention on top of that (concurrent disk I/O,
     # guestkit's qemu-nbd mount for the guest-agent token injection — see
-    # ephemera_image::inject_guest_agent_token — competing with whatever the
+    # fluxvm_image::inject_guest_agent_token — competing with whatever the
     # previous case is still cleaning up) and pushed this past 240s in
     # practice. 90 attempts gives real headroom over the worst case seen.
     [ "$backend" = "firecracker" ] && attempts=90
@@ -148,7 +148,7 @@ create_and_check() {
 section "Case A: auto with no kernel/firmware anywhere -> qemu"
 cat > "${TMP}/a.json" <<JSON
 {
-  "name": "ephemera-auto-a",
+  "name": "fluxvm-auto-a",
   "backend": "auto",
   "image": "${QEMU_IMAGE}",
   "vcpus": 1,
@@ -163,7 +163,7 @@ create_and_check "Case A" "${TMP}/a.json" "qemu"
 section "Case B: auto with a request-level kernel -> firecracker"
 cat > "${TMP}/b.json" <<JSON
 {
-  "name": "ephemera-auto-b",
+  "name": "fluxvm-auto-b",
   "backend": "auto",
   "image": "${FC_IMAGE}",
   "kernel": "${FC_KERNEL}",
@@ -177,7 +177,7 @@ JSON
 create_and_check "Case B" "${TMP}/b.json" "firecracker"
 
 section "Case C: auto with only a config-level default kernel -> firecracker"
-CONFIG_BACKUP="${TMP}/ephemera.toml.bak"
+CONFIG_BACKUP="${TMP}/fluxvm.toml.bak"
 cp "$CONFIG" "$CONFIG_BACKUP"
 if grep -q '^firecracker_kernel' "$CONFIG"; then
     sed -i "s@^firecracker_kernel.*@firecracker_kernel = \"${FC_KERNEL}\"@" "$CONFIG"
@@ -188,7 +188,7 @@ else
 fi
 cat > "${TMP}/c.json" <<JSON
 {
-  "name": "ephemera-auto-c",
+  "name": "fluxvm-auto-c",
   "backend": "auto",
   "image": "${FC_IMAGE}",
   "vcpus": 1,
@@ -201,7 +201,7 @@ JSON
 create_and_check "Case C" "${TMP}/c.json" "firecracker"
 cp "$CONFIG_BACKUP" "$CONFIG"
 CONFIG_BACKUP=""
-pass "Case C: /etc/ephemera.toml restored"
+pass "Case C: /etc/fluxvm.toml restored"
 
 section "Summary"
 echo "  pass: ${PASS}  fail: ${FAIL}"

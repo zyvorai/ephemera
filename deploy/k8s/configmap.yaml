@@ -6,13 +6,13 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: ephemera-config
-  namespace: ephemera-system
+  name: fluxvm-config
+  namespace: fluxvm-system
 data:
-  ephemera.toml: |
+  fluxvm.toml: |
     listen = "127.0.0.1:7788"
-    state_dir = "/var/lib/ephemera"
-    run_dir = "/run/ephemera"
+    state_dir = "/var/lib/fluxvm"
+    run_dir = "/run/fluxvm"
     qemu_binary = "qemu-system-x86_64"
     qemu_img_binary = "qemu-img"
     cloud_hypervisor_binary = "cloud-hypervisor"

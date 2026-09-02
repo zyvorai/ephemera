@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Real-hardware regression test for per-VM network namespaces
-# (NetworkSpec::Tap { netns: true }, ephemera_network::netns). Boots a real
+# (NetworkSpec::Tap { netns: true }, fluxvm_network::netns). Boots a real
 # QEMU VM whose tap device — and the VMM process itself — live inside a
 # private network namespace instead of the host's default one.
 #
@@ -22,13 +22,13 @@
 #   leftover veth/bridge/tap on the host either)
 #
 # Usage:
-#   sudo ./scripts/test-network-namespace.sh --image /var/lib/ephemera/images/ephemera-lifecycle-test.qcow2
+#   sudo ./scripts/test-network-namespace.sh --image /var/lib/fluxvm/images/fluxvm-lifecycle-test.qcow2
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-CONFIG="/etc/ephemera.toml"
+CONFIG="/etc/fluxvm.toml"
 [ -f "$CONFIG" ] || CONFIG=""
 IMAGE=""
 
@@ -49,14 +49,14 @@ done
 [ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — netns/veth/iptables setup needs it." >&2; exit 1; }
 [ -n "$IMAGE" ] && [ -f "$IMAGE" ] || { echo "--image is required and must exist" >&2; exit 1; }
 
-EPH="${EPHEMERA_BIN:-}"
+EPH="${FLUXVM_BIN:-}"
 if [ -z "$EPH" ]; then
-    if command -v ephemera >/dev/null 2>&1; then
-        EPH="$(command -v ephemera)"
-    elif [ -x "${PROJECT_DIR}/target/release/ephemera" ]; then
-        EPH="${PROJECT_DIR}/target/release/ephemera"
+    if command -v fluxvm >/dev/null 2>&1; then
+        EPH="$(command -v fluxvm)"
+    elif [ -x "${PROJECT_DIR}/target/release/fluxvm" ]; then
+        EPH="${PROJECT_DIR}/target/release/fluxvm"
     else
-        echo "ephemera binary not found. Build it (cargo build --release -p ephemera-cli) or set EPHEMERA_BIN." >&2
+        echo "fluxvm binary not found. Build it (cargo build --release -p fluxvm-cli) or set FLUXVM_BIN." >&2
         exit 1
     fi
 fi
@@ -95,7 +95,7 @@ section "Create (QEMU, network.mode=tap, netns=true, agent enabled)"
 MAC=$(printf '52:54:00:%02x:%02x:%02x' $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256)))
 cat > "${TMP}/vm.json" <<JSON
 {
-  "name": "ephemera-netns-test",
+  "name": "fluxvm-netns-test",
   "backend": "qemu",
   "image": "${IMAGE}",
   "vcpus": 1,

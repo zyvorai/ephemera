@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Real-hardware regression test for the Firecracker jailer integration
-# (config.jailer.enabled, ephemera-firecracker::launch_jailed). Boots a real
+# (config.jailer.enabled, fluxvm-firecracker::launch_jailed). Boots a real
 # Firecracker microVM through the actual `jailer` binary.
 #
 # Proves:
@@ -24,8 +24,8 @@
 #
 # Usage:
 #   sudo ./scripts/test-firecracker-jailer.sh \
-#       --kernel /var/lib/ephemera/kernels/vmlinux-fc \
-#       --image /var/lib/ephemera/images/ubuntu-fc-root-agent.raw
+#       --kernel /var/lib/fluxvm/kernels/vmlinux-fc \
+#       --image /var/lib/fluxvm/images/ubuntu-fc-root-agent.raw
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -56,14 +56,14 @@ done
 [ -n "$IMAGE" ] && [ -f "$IMAGE" ] || { echo "--image is required and must exist" >&2; exit 1; }
 command -v jailer >/dev/null 2>&1 || { echo "jailer binary not found on PATH" >&2; exit 1; }
 
-EPH="${EPHEMERA_BIN:-}"
+EPH="${FLUXVM_BIN:-}"
 if [ -z "$EPH" ]; then
-    if command -v ephemera >/dev/null 2>&1; then
-        EPH="$(command -v ephemera)"
-    elif [ -x "${PROJECT_DIR}/target/release/ephemera" ]; then
-        EPH="${PROJECT_DIR}/target/release/ephemera"
+    if command -v fluxvm >/dev/null 2>&1; then
+        EPH="$(command -v fluxvm)"
+    elif [ -x "${PROJECT_DIR}/target/release/fluxvm" ]; then
+        EPH="${PROJECT_DIR}/target/release/fluxvm"
     else
-        echo "ephemera binary not found. Build it (cargo build --release -p ephemera-cli) or set EPHEMERA_BIN." >&2
+        echo "fluxvm binary not found. Build it (cargo build --release -p fluxvm-cli) or set FLUXVM_BIN." >&2
         exit 1
     fi
 fi
@@ -77,7 +77,7 @@ section() { echo ""; echo "=== $1 ==="; }
 TMP="$(mktemp -d)"
 ID=""
 cleanup() {
-    [ -n "$ID" ] && "$EPH" --config "${TMP}/ephemera.toml" delete "$ID" >/dev/null 2>&1 || true
+    [ -n "$ID" ] && "$EPH" --config "${TMP}/fluxvm.toml" delete "$ID" >/dev/null 2>&1 || true
     rm -rf "$TMP" "$CHROOT_BASE"
 }
 trap cleanup EXIT
@@ -99,7 +99,7 @@ wait_exec() {
     return 1
 }
 
-cat > "${TMP}/ephemera.toml" <<TOML
+cat > "${TMP}/fluxvm.toml" <<TOML
 listen = "127.0.0.1:7788"
 state_dir = "${TMP}/state"
 run_dir = "${TMP}/run"
@@ -119,13 +119,13 @@ uid = ${JAIL_UID}
 gid = ${JAIL_GID}
 chroot_base_dir = "${CHROOT_BASE}"
 TOML
-eph() { "$EPH" --config "${TMP}/ephemera.toml" "$@"; }
+eph() { "$EPH" --config "${TMP}/fluxvm.toml" "$@"; }
 mkdir -p "${TMP}/state"
 
 section "Create (Firecracker, jailer enabled)"
 cat > "${TMP}/vm.json" <<JSON
 {
-  "name": "ephemera-jailer-test",
+  "name": "fluxvm-jailer-test",
   "backend": "firecracker",
   "image": "${IMAGE}",
   "kernel": "${KERNEL}",

@@ -2,7 +2,7 @@
 # Copyright 2026 Zyvor
 # SPDX-License-Identifier: Apache-2.0
 
-# Minimal real-hardware smoke test: `ephemera serve` comes up, answers
+# Minimal real-hardware smoke test: `fluxvm serve` comes up, answers
 # /healthz, boots a real QEMU VM via the REST API (no agent, no network —
 # just the bare create path), and the VM actually reaches a real systemd
 # boot sequence (not just "a qemu-system-x86_64 process exists"). Then
@@ -15,10 +15,10 @@
 # scripts/test-lifecycle.sh needs (an agent-enabled image, vsock).
 #
 # Usage:
-#   sudo ./scripts/test-boot-smoke.sh --image /var/lib/ephemera/images/ubuntu-noble.qcow2
+#   sudo ./scripts/test-boot-smoke.sh --image /var/lib/fluxvm/images/ubuntu-noble.qcow2
 #
 # Env:
-#   EPHEMERA_BIN   path to the ephemera binary (default: resolved from PATH or target/release)
+#   FLUXVM_BIN   path to the fluxvm binary (default: resolved from PATH or target/release)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,17 +40,17 @@ done
 
 [ "$(uname -s)" = "Linux" ] || { echo "This test boots a real VM and requires a Linux/KVM host." >&2; exit 1; }
 [ -e /dev/kvm ] || { echo "/dev/kvm missing — enable virtualization first." >&2; exit 1; }
-[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — VM creation needs /var/lib/ephemera access." >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — VM creation needs /var/lib/fluxvm access." >&2; exit 1; }
 [ -n "$IMAGE" ] && [ -f "$IMAGE" ] || { echo "--image is required and must exist" >&2; exit 1; }
 
-EPH="${EPHEMERA_BIN:-}"
+EPH="${FLUXVM_BIN:-}"
 if [ -z "$EPH" ]; then
-    if [ -x "${PROJECT_DIR}/target/release/ephemera" ]; then
-        EPH="${PROJECT_DIR}/target/release/ephemera"
-    elif command -v ephemera >/dev/null 2>&1; then
-        EPH="$(command -v ephemera)"
+    if [ -x "${PROJECT_DIR}/target/release/fluxvm" ]; then
+        EPH="${PROJECT_DIR}/target/release/fluxvm"
+    elif command -v fluxvm >/dev/null 2>&1; then
+        EPH="$(command -v fluxvm)"
     else
-        echo "ephemera binary not found. Build it (cargo build --release -p ephemera-cli) or set EPHEMERA_BIN." >&2
+        echo "fluxvm binary not found. Build it (cargo build --release -p fluxvm-cli) or set FLUXVM_BIN." >&2
         exit 1
     fi
 fi
@@ -74,7 +74,7 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "${TMP}/state" "${TMP}/run"
-cat > "${TMP}/ephemera.toml" <<TOML
+cat > "${TMP}/fluxvm.toml" <<TOML
 listen = "127.0.0.1:17801"
 state_dir = "${TMP}/state"
 run_dir = "${TMP}/run"
@@ -88,12 +88,12 @@ default_bridge = "vmbr0"
 reaper_interval_secs = 5
 TOML
 
-section "ephemera serve starts and answers /healthz"
-"$EPH" --config "${TMP}/ephemera.toml" serve > "${TMP}/serve.log" 2>&1 &
+section "fluxvm serve starts and answers /healthz"
+"$EPH" --config "${TMP}/fluxvm.toml" serve > "${TMP}/serve.log" 2>&1 &
 SERVE_PID=$!
 sleep 2
-kill -0 "$SERVE_PID" 2>/dev/null || { fail "ephemera serve failed to start"; cat "${TMP}/serve.log" >&2; exit 1; }
-pass "ephemera serve is running (pid ${SERVE_PID})"
+kill -0 "$SERVE_PID" 2>/dev/null || { fail "fluxvm serve failed to start"; cat "${TMP}/serve.log" >&2; exit 1; }
+pass "fluxvm serve is running (pid ${SERVE_PID})"
 if curl -sS -m 5 "${BASE_URL}/healthz" | grep -q '"ok":true'; then
     pass "/healthz reports ok"
 else

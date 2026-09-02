@@ -2,17 +2,31 @@
 # SPDX-License-Identifier: Apache-2.0
 
 listen = "127.0.0.1:7788"
-state_dir = "/var/lib/ephemera"
-run_dir = "/run/ephemera"
+state_dir = "/var/lib/fluxvm"
+run_dir = "/run/fluxvm"
 qemu_binary = "qemu-system-x86_64"
 qemu_img_binary = "qemu-img"
 cloud_hypervisor_binary = "cloud-hypervisor"
 cloud_localds_binary = "cloud-localds"
 firecracker_binary = "firecracker"
-# firecracker_kernel = "/var/lib/ephemera/kernels/vmlinux"
+# firecracker_kernel = "/var/lib/fluxvm/kernels/vmlinux"
+# In-tree microVMM for the agent-sandbox track (`backend = "flux-vm"`).
+fluxvm_hypervisor_binary = "fluxvm-hypervisor"
+# fluxvm_kernel = "/var/lib/fluxvm/kernels/vmlinux"
 # cloud_hypervisor_firmware = "/usr/share/cloud-hypervisor/CLOUDHV.fd"
 default_bridge = "vmbr0"
 reaper_interval_secs = 5
+
+# Agent-sandbox controls (FluxVm backend). Autopause is off when idle_secs = 0.
+# [sandbox]
+# autopause_idle_secs = 300
+# autopause_scan_secs = 10
+# egress_allow_domains = ["api.openai.com", ".github.com"]
+# templates_dir = "/var/lib/fluxvm/templates"
+# egress_proxy_listen = "127.0.0.1:18080"
+# [[sandbox.credential_vault]]
+# host = "api.openai.com"
+# authorization = "Bearer REPLACE_ME"
 
 # Every field is optional and defaults to unrestricted — uncomment only the
 # limits you want. An absent [policy] table (or this whole section commented
@@ -23,7 +37,7 @@ reaper_interval_secs = 5
 # max_disk_gib = 100
 # max_ttl_seconds = 86400          # every request must set a ttl_seconds <= this; unbounded VMs are rejected
 # allowed_backends = ["qemu", "firecracker"]
-# allowed_image_dirs = ["/var/lib/ephemera/images"]
+# allowed_image_dirs = ["/var/lib/fluxvm/images"]
 
 # REST API bearer-token auth/RBAC. Absent or empty -> auth is off and every
 # request is treated as admin (the pre-auth MVP default). GET /healthz never

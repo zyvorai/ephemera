@@ -1,10 +1,10 @@
-# Ephemera customer PDFs
+# FluxVM customer PDFs
 
 Generated: 2026-08-29
 
 Rebuild: `node scripts/customer-docs/build-customer-pdfs.mjs`
 
-- `Ephemera-Customer-README.pdf` — Customer Documentation Overview
-- `Ephemera-Getting-Started.pdf` — Getting Started
-- `Ephemera-Admin-Basics.pdf` — Admin Basics
-- `Ephemera-Page-by-Page.pdf` — Page-by-Page Product Manual
+- `FluxVM-Customer-README.pdf` — Customer Documentation Overview
+- `FluxVM-Getting-Started.pdf` — Getting Started
+- `FluxVM-Admin-Basics.pdf` — Admin Basics
+- `FluxVM-Page-by-Page.pdf` — Page-by-Page Product Manual

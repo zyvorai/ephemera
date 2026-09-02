@@ -26,13 +26,13 @@ Every route is also listed in the [complete page index](../PAGE_INDEX.md).
 
 | Page | What it covers |
 |------|----------------|
-| [Ragnarok Integration](integrations/ragnarok-integration.md) | Drive Ephemera disposable VMs from Ragnarok UI + SSO. |
+| [Ragnarok Integration](integrations/ragnarok-integration.md) | Drive FluxVM disposable VMs from Ragnarok UI + SSO. |
 
 ## Onboarding
 
 | Page | What it covers |
 |------|----------------|
-| [Getting Started](onboarding/getting-started.md) | Install Ephemera and boot your first disposable VM. |
+| [Getting Started](onboarding/getting-started.md) | Install FluxVM and boot your first disposable VM. |
 | [Use Cases](onboarding/use-cases.md) | Concrete scenarios — CI runners, golden images, fleets, sandboxes. |
 
 ## Operations

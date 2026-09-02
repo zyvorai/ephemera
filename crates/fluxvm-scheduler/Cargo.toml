@@ -1,0 +1,29 @@
+# Copyright 2026 Zyvor
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "fluxvm-scheduler"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "VM lifecycle orchestration (VmManager) for Zyvor FluxVM"
+
+[dependencies]
+fluxvm-core = { path = "../fluxvm-core" }
+fluxvm-storage = { path = "../fluxvm-storage" }
+fluxvm-network = { path = "../fluxvm-network" }
+fluxvm-image = { path = "../fluxvm-image" }
+fluxvm-qemu = { path = "../fluxvm-qemu" }
+fluxvm-cloud-hypervisor = { path = "../fluxvm-cloud-hypervisor" }
+fluxvm-firecracker = { path = "../fluxvm-firecracker" }
+fluxvm-hypervisor = { path = "../fluxvm-hypervisor" }
+fluxvm-guest-protocol = { path = "../fluxvm-guest-protocol" }
+fluxvm-vsock-client = { path = "../fluxvm-vsock-client" }
+fluxvm-cgroup = { path = "../fluxvm-cgroup" }
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }

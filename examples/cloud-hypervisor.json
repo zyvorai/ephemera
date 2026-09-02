@@ -1,7 +1,7 @@
 {
   "name": "ch-ephemeral",
   "backend": "cloud-hypervisor",
-  "image": "/var/lib/ephemera/images/ubuntu.qcow2",
+  "image": "/var/lib/fluxvm/images/ubuntu.qcow2",
   "vcpus": 2,
   "memory_mib": 2048,
   "kernel": "/usr/share/cloud-hypervisor/hypervisor-fw",

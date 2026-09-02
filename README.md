@@ -1,14 +1,14 @@
 <div align="center">
 
-# Zyvor Ephemera
+# Zyvor FluxVM
 
-### Disposable Compute Engine — secure, isolated, short-lived VMs via Firecracker, Cloud Hypervisor, and QEMU/KVM
+### Disposable Compute Engine — secure, isolated, short-lived VMs via Firecracker, Cloud Hypervisor, QEMU/KVM, and FluxVM hypervisor
 
-[![CI](https://github.com/zyvorai/ephemera/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/ephemera/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/github/license/zyvorai/ephemera)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/zyvorai/ephemera?sort=semver)](https://github.com/zyvorai/ephemera/releases)
+[![CI](https://github.com/zyvorai/fluxvm/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/fluxvm/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/github/license/zyvorai/fluxvm)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/zyvorai/fluxvm?sort=semver)](https://github.com/zyvorai/fluxvm/releases)
 
-[Quick start](#build) · [Customer path](#who-does-what-customers) · [Use cases](docs/use-cases.md) · [zyvor.dev/docs](https://zyvor.dev/docs?utm_source=github&utm_medium=ephemera) · [Blog](https://zyvor.dev/blog?utm_source=github&utm_medium=ephemera)
+[Quick start](#build) · [Customer path](#who-does-what-customers) · [Use cases](docs/use-cases.md) · [zyvor.dev/docs](https://zyvor.dev/docs?utm_source=github&utm_medium=fluxvm) · [Blog](https://zyvor.dev/blog?utm_source=github&utm_medium=fluxvm)
 
 </div>
 
@@ -20,11 +20,12 @@ Firecracker, Cloud Hypervisor, and QEMU/KVM from one Rust-native control plane.
 - **QEMU/KVM** — broad guest/device compatibility, qcow2 CoW overlays, QMP socket.
 - **Cloud Hypervisor** — Rust VMM for modern cloud workloads, direct-kernel or firmware boot.
 - **Firecracker** — microVM backend using a Linux kernel + raw root filesystem.
+- **FluxVM hypervisor** (`fluxvm-hypervisor`) — in-tree lightweight KVM microVMM (agent-sandbox track).
 
 It also contains a small **virt-builder-style image pipeline**: use a local/HTTP base image, verify SHA-256, convert/resize it, and customize it before first boot.
 
-Beyond a single host: a `DisposableVm` Kubernetes CRD + node-local operator (`ephemera-kube`), and a
-non-Kubernetes distributed node-agent (`ephemera-agent`) with a central fleet registry and load-aware
+Beyond a single host: a `DisposableVm` Kubernetes CRD + node-local operator (`fluxvm-kube`), and a
+non-Kubernetes distributed node-agent (`fluxvm-agent`) with a central fleet registry and load-aware
 placement across multiple hosts — see "Kubernetes CRD/operator" and "Distributed node-agent" below.
 
 > This repository is a complete MVP/control-plane skeleton, not a finished multi-tenant security boundary. Authentication/RBAC, the Firecracker jailer (chroot + uid/gid isolation), cgroup v2 resource control, and per-VM network namespaces are already implemented (see "Auth / RBAC", "Firecracker jailer", "Resource control (cgroup v2)", and "Network namespaces" below) — before exposing it to untrusted tenants, still add seccomp/AppArmor/SELinux policy, quotas, audit logging and stronger image provenance.
@@ -36,12 +37,12 @@ See [`docs/use-cases.md`](docs/use-cases.md) for concrete use cases — ephemera
 | You need… | Use |
 |-----------|-----|
 | Score / repair a disk **offline** (doctor, passport, fix plans) | **[GuestKit](https://github.com/zyvorai/guestkit)** |
-| **Boot & manage** that qcow2 (network, SSH, TTL, pause/resume, fleets) | **This repo (Ephemera)** |
+| **Boot & manage** that qcow2 (network, SSH, TTL, pause/resume, fleets) | **This repo (FluxVM)** |
 | Hypervisor → KVM convert + import | **[h2kvm](https://github.com/zyvorai/h2kvm)** |
 
-**Certify with GuestKit → run & manage with Ephemera → convert/deploy with h2kvm.**
+**Certify with GuestKit → run & manage with FluxVM → convert/deploy with h2kvm.**
 
-Ephemera already creates TAP/macvtap, optional per-VM **netns + DHCP** (known `guest_ip`),
+FluxVM already creates TAP/macvtap, optional per-VM **netns + DHCP** (known `guest_ip`),
 cloud-init seeds, CoW overlays, and TTL reaping. GuestKit does **not** duplicate that —
 hand off after the disk is certified.
 
@@ -54,30 +55,30 @@ guestkit plan apply virtio.yaml --vm /path/to/disk.qcow2 --yes   # if needed
 guestkit passport emit /path/to/disk.qcow2 --target kvm -o passport.json
 guestkit gate --image /path/to/disk.qcow2 --fail-below 80
 
-# ── 2. Prepare host once (Ephemera) ────────────────────────────
+# ── 2. Prepare host once (FluxVM) ────────────────────────────
 sudo ./scripts/bootstrap-host.sh          # bridge, dirs, deps
-cargo build --release -p ephemera-cli     # or install release binaries
+cargo build --release -p fluxvm-cli     # or install release binaries
 
 # ── 3. Run the certified qcow2 ─────────────────────────────────
 # Edit examples/qemu.json → set "image" to your disk and your SSH pubkey.
-sudo ./target/release/ephemera --config /etc/ephemera.toml create \
+sudo ./target/release/fluxvm --config /etc/fluxvm.toml create \
   --spec examples/qemu.json
 
 # Day-2
-ephemera list
-ephemera get <id>                 # includes guest_ip for netns mode
-ephemera exec <id> -- hostname
-ephemera pause <id> && ephemera resume <id>
-ephemera delete <id>              # or wait for ttl_seconds
+fluxvm list
+fluxvm get <id>                 # includes guest_ip for netns mode
+fluxvm exec <id> -- hostname
+fluxvm pause <id> && fluxvm resume <id>
+fluxvm delete <id>              # or wait for ttl_seconds
 ```
 
-### Pick a network mode (Ephemera owns this)
+### Pick a network mode (FluxVM owns this)
 
 | Mode | Spec sketch | Guest IP |
 |------|-------------|----------|
 | Lab / SSH | `"network": {"mode":"user","forwards":[{"host_port":2222,"guest_port":22}]}` | QEMU SLIRP DHCP; SSH via `localhost:2222` |
 | LAN DHCP | `"network": {"mode":"tap","bridge":"vmbr0","mac":"06:…"}` | Your bridge’s DHCP |
-| Known IP | `"network": {"mode":"tap","netns":true,"mac":"06:…"}` + optional `"cloud_init":{"static_network":true}` | Ephemera dnsmasq; see `ephemera get` |
+| Known IP | `"network": {"mode":"tap","netns":true,"mac":"06:…"}` + optional `"cloud_init":{"static_network":true}` | FluxVM dnsmasq; see `fluxvm get` |
 | L2 macvtap | `"network": {"mode":"macvtap","parent":"eth0","mac":"06:…"}` | Your L2 / static via cloud-init |
 
 Full examples: [`examples/qemu.json`](examples/qemu.json) (user-mode lab),
@@ -87,21 +88,21 @@ Networking tests: `sudo ./scripts/test-networking.sh --image /path/to/disk.qcow2
 
 ### Libvirt / virsh replacement (host-local)
 
-Ephemera is the Zyvor **host-local** replacement for libvirt/virsh lifecycle and
+FluxVM is the Zyvor **host-local** replacement for libvirt/virsh lifecycle and
 networking. It is **not** a drop-in for KubeVirt/OpenShift (`virtctl` stays).
 
-| virsh / libvirt | Ephemera |
+| virsh / libvirt | FluxVM |
 |-----------------|----------|
-| `virsh define` + `start` | `ephemera create --spec …` (CoW overlay + boot) |
-| `virsh list --all` | `ephemera list` |
-| `virsh dominfo` / guest IP | `ephemera get <id>` (`guest_ip` when `netns: true`) |
-| `virsh shutdown` / `destroy` | `ephemera delete <id>` (or wait for `ttl_seconds`) |
-| `virsh suspend` / `resume` | `ephemera pause` / `ephemera resume` |
-| `virsh qemu-agent-command` | Prefer GuestKit `guestkit qga`, or `ephemera exec` (vsock agent) |
+| `virsh define` + `start` | `fluxvm create --spec …` (CoW overlay + boot) |
+| `virsh list --all` | `fluxvm list` |
+| `virsh dominfo` / guest IP | `fluxvm get <id>` (`guest_ip` when `netns: true`) |
+| `virsh shutdown` / `destroy` | `fluxvm delete <id>` (or wait for `ttl_seconds`) |
+| `virsh suspend` / `resume` | `fluxvm pause` / `fluxvm resume` |
+| `virsh qemu-agent-command` | Prefer GuestKit `guestkit qga`, or `fluxvm exec` (vsock agent) |
 | libvirt NAT (`virbr0`) | `network.mode=user`, or `tap` + existing bridge, or `tap`+`netns` |
 
 Offline disk certify/repair stays in **[GuestKit](https://github.com/zyvorai/guestkit)**
-(`doctor`, `passport`, `plan`). Lab-only smoke without Ephemera: `guestkit vm`
+(`doctor`, `passport`, `plan`). Lab-only smoke without FluxVM: `guestkit vm`
 (user-mode only).
 
 ## Table of contents
@@ -132,12 +133,13 @@ Offline disk certify/repair stays in **[GuestKit](https://github.com/zyvorai/gue
 - [REST API](#rest-api)
 - [VM JSON contract](#vm-json-contract)
 - [Kubernetes CRD/operator](#kubernetes-crdoperator)
-- [Using Ephemera through zyvor-fabric](#using-ephemera-through-zyvor-fabric)
-- [Using Ephemera through Ragnarok](#using-ephemera-through-ragnarok)
+- [Using FluxVM through zyvor-fabric](#using-fluxvm-through-zyvor-fabric)
+- [Using FluxVM through Ragnarok](#using-fluxvm-through-ragnarok)
 - [Distributed node-agent](#distributed-node-agent)
 - [State layout](#state-layout)
 - [Production changes I would make next](#production-changes-i-would-make-next)
 - [Important limitations in this MVP](#important-limitations-in-this-mvp)
+- [AI-agent sandbox gaps](docs/agent-sandbox-gaps.md)
 - [License](#license)
 
 ## Architecture
@@ -167,36 +169,37 @@ VM launch: template -> disposable clone -> cloud-init -> VMM -> TTL delete
 
 ## Project layout
 
-The MVP is a Cargo workspace, structured to match Zyvor Ephemera's longer-term
+The MVP is a Cargo workspace, structured to match Zyvor FluxVM's longer-term
 multi-node architecture:
 
 ```text
 crates/
-├── ephemera-core                 domain types, config, VmBackend trait
-├── ephemera-cgroup                cgroup v2 resource control (cpu/memory/io/freezer/pressure/cpuset)
-├── ephemera-storage               VM-record state persistence
-├── ephemera-network               TAP/bridge network preparation
-├── ephemera-image                 image build/clone + cloud-init seed generation
-├── ephemera-qemu                  QEMU/KVM backend
-├── ephemera-cloud-hypervisor      Cloud Hypervisor backend
-├── ephemera-firecracker           Firecracker backend
-├── ephemera-guest-protocol        wire types shared by the guest agent and its host client
-├── ephemera-guest-agent           in-guest AF_VSOCK agent binary (ping/exec/shutdown)
-├── ephemera-vsock-client          host-side vsock dialing (native for QEMU, UDS proxy for CH/Firecracker)
-├── ephemera-scheduler             VmManager: VM lifecycle orchestration + TTL reaper
-├── ephemera-api                   REST API (axum)
-├── ephemera-cli                   `ephemera` CLI binary (composition root)
-├── ephemera-agent                 fleet registry + per-host node-agent daemon (multi-node)
-└── ephemera-kube                  DisposableVm CRD + node-local Kubernetes operator
+├── fluxvm-core                 domain types, config, VmBackend trait
+├── fluxvm-cgroup                cgroup v2 resource control (cpu/memory/io/freezer/pressure/cpuset)
+├── fluxvm-storage               VM-record state persistence
+├── fluxvm-network               TAP/bridge network preparation
+├── fluxvm-image                 image build/clone + cloud-init seed generation
+├── fluxvm-qemu                  QEMU/KVM backend
+├── fluxvm-cloud-hypervisor      Cloud Hypervisor backend
+├── fluxvm-firecracker           Firecracker backend
+├── fluxvm-hypervisor            in-tree lightweight KVM microVMM (`fluxvm-hypervisor` binary)
+├── fluxvm-guest-protocol        wire types shared by the guest agent and its host client
+├── fluxvm-guest-agent           in-guest AF_VSOCK agent binary (ping/exec/shutdown)
+├── fluxvm-vsock-client          host-side vsock dialing (native for QEMU, UDS proxy for CH/Firecracker)
+├── fluxvm-scheduler             VmManager: VM lifecycle orchestration + TTL reaper
+├── fluxvm-api                   REST API (axum)
+├── fluxvm-cli                   `fluxvm` CLI binary (composition root)
+├── fluxvm-agent                 fleet registry + per-host node-agent daemon (multi-node)
+└── fluxvm-kube                  DisposableVm CRD + node-local Kubernetes operator
 ```
 
-`ephemera-agent` (a distinct concept from `ephemera-guest-agent` above — this one is the
-per-*host* node-agent for multi-node deployments) and `ephemera-kube` are both implemented
+`fluxvm-agent` (a distinct concept from `fluxvm-guest-agent` above — this one is the
+per-*host* node-agent for multi-node deployments) and `fluxvm-kube` are both implemented
 and verified against real multi-host/cluster infrastructure — see "Distributed node-agent"
 and "Kubernetes CRD/operator" below.
 
 This project also depends on the sibling [`guestkit`](https://github.com/zyvorai/guestkit)
-project (path dep from `ephemera-image`) for offline image customization — see
+project (path dep from `fluxvm-image`) for offline image customization — see
 "Build an image" below. For the **customer certify → run** path, see
 [Who does what](#who-does-what-customers) above.
 
@@ -206,7 +209,8 @@ project (path dep from `ephemera-image`) for offline image customization — see
 - QEMU backend, pause/resume/shutdown via QMP.
 - Cloud Hypervisor backend, pause/resume/shutdown via `ch-remote`.
 - Firecracker backend using JSON `--config-file`, pause/resume via `PATCH /vm`, shutdown via `SendCtrlAltDel`.
-- Vsock guest agent (`ephemera exec <id> -- <command>`) — run a command inside the guest with no SSH and no network path at all; works over QEMU's native AF_VSOCK device and Cloud Hypervisor/Firecracker's UDS vsock proxy.
+- FluxVM hypervisor backend (`backend: "flux-vm"`) — in-tree control plane that boots real Linux guests via Firecracker as the KVM engine, with UDS pause/resume/shutdown/snapshot, sandbox REST (`/v1/sandboxes`), templates, AutoPause, L7 egress proxy, and `/console` UI (see [docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md)).
+- Vsock guest agent (`fluxvm exec <id> -- <command>`) — run a command inside the guest with no SSH and no network path at all; works over QEMU's native AF_VSOCK device and Cloud Hypervisor/Firecracker/FluxVm UDS vsock proxy.
 - `stop` prefers a graceful VMM shutdown, falling back to force-kill only if the process doesn't exit within a grace period.
 - QEMU qcow2 backing overlays for cheap disposable writes.
 - Raw reflink copies for Firecracker / Cloud Hypervisor when the host filesystem supports reflinks.
@@ -229,8 +233,8 @@ project (path dep from `ephemera-image`) for offline image customization — see
 - SSH/rsync remote deploy script with full and quick profiles.
 - End-to-end networking smoke test (QEMU user-mode NAT, TAP+bridge+DHCP, and macvtap, all SSH-verified).
 - End-to-end lifecycle smoke test (vsock exec, pause/resume, graceful shutdown, and vsock-CID uniqueness under concurrent creates, all verified against real VMs).
-- Kubernetes `DisposableVm` CRD + node-local operator (`ephemera-kube`), verified against a real k3s cluster — see "Kubernetes CRD/operator" below.
-- Distributed node-agent (`ephemera-agent`): central fleet registry + per-host heartbeat client with load-aware placement, verified across two real physically separate hosts — see "Distributed node-agent" below.
+- Kubernetes `DisposableVm` CRD + node-local operator (`fluxvm-kube`), verified against a real k3s cluster — see "Kubernetes CRD/operator" below.
+- Distributed node-agent (`fluxvm-agent`): central fleet registry + per-host heartbeat client with load-aware placement, verified across two real physically separate hosts — see "Distributed node-agent" below.
 
 ## Host requirements
 
@@ -287,16 +291,16 @@ binary, verify its SHA-256 digest, and `install` it to `/usr/local/bin` (overrid
 ## Build
 
 Use a current stable Rust toolchain. This is a Cargo workspace; `cargo build` builds every crate,
-producing the `ephemera` CLI at `target/release/ephemera`:
+producing the `fluxvm` CLI at `target/release/fluxvm`:
 
 ```bash
 cargo build --release
-sudo install -m 0755 target/release/ephemera /usr/local/bin/ephemera
-sudo install -m 0644 config.example.toml /etc/ephemera.toml
+sudo install -m 0755 target/release/fluxvm /usr/local/bin/fluxvm
+sudo install -m 0644 config.example.toml /etc/fluxvm.toml
 ```
 
-`cargo build --release` also produces `target/release/ephemera-kube` (the Kubernetes operator — see
-"Kubernetes CRD/operator") and `target/release/ephemera-agent` (the fleet registry/node-agent — see
+`cargo build --release` also produces `target/release/fluxvm-kube` (the Kubernetes operator — see
+"Kubernetes CRD/operator") and `target/release/fluxvm-agent` (the fleet registry/node-agent — see
 "Distributed node-agent"); neither is installed by the two commands above, since not every deployment
 needs either.
 
@@ -328,7 +332,7 @@ actually reachable over SSH — not just that the process launched:
   macvtap sibling on the same parent to reach the guest's statically-assigned IP.
 
 All three also assert cleanup: the QEMU process and (for TAP/macvtap) the interface must actually be
-gone after `ephemera delete` — this is what caught a TAP-interface leak during development (fixed
+gone after `fluxvm delete` — this is what caught a TAP-interface leak during development (fixed
 by making VM shutdown wait for the process to actually exit before releasing its network resources).
 
 ```bash
@@ -398,7 +402,7 @@ sudo ./scripts/test-network-namespace.sh --image /path/to/base.qcow2
 Edit `examples/qemu.json` to point at your base image and SSH public key.
 
 ```bash
-sudo /usr/local/bin/ephemera --config /etc/ephemera.toml create \
+sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml create \
   --spec examples/qemu.json
 ```
 
@@ -413,7 +417,7 @@ Example behavior:
 ## Create a Cloud Hypervisor VM
 
 ```bash
-sudo /usr/local/bin/ephemera --config /etc/ephemera.toml create \
+sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml create \
   --spec examples/cloud-hypervisor.json
 ```
 
@@ -422,7 +426,7 @@ The backend uses a raw per-instance disk. If the base image is already raw and t
 ## Create a Firecracker microVM
 
 ```bash
-sudo /usr/local/bin/ephemera --config /etc/ephemera.toml create \
+sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml create \
   --spec examples/firecracker.json
 ```
 
@@ -445,7 +449,7 @@ chroot_base_dir = "/srv/jailer"   # should be on the same filesystem as state_di
 `firecracker_binary` must be an absolute path when jailer is enabled — `jailer`'s `--exec-file` needs
 a real path, not a bare command resolved via `$PATH`.
 
-Ephemera hardlinks the kernel and rootfs into `jailer`'s chroot (`<chroot_base_dir>/<firecracker
+FluxVM hardlinks the kernel and rootfs into `jailer`'s chroot (`<chroot_base_dir>/<firecracker
 basename>/<vm-id>/root/`) before invoking it — falling back to a real copy if `chroot_base_dir` is on
 a different filesystem than the source files, which is why same-filesystem placement matters (a
 multi-GB rootfs copy per VM otherwise). Every subsequent control-plane operation (pause/resume/stop,
@@ -472,7 +476,7 @@ start of `create` (the resolved value — never `"auto"` — is what's persisted
    BIOS/UEFI, with no kernel or firmware required.
 
 ```json
-{ "name": "auto-example", "backend": "auto", "image": "/var/lib/ephemera/images/ubuntu.qcow2", "...": "..." }
+{ "name": "auto-example", "backend": "auto", "image": "/var/lib/fluxvm/images/ubuntu.qcow2", "...": "..." }
 ```
 
 Verified on real hardware (`scripts/test-auto-backend.sh`): all three resolution paths actually boot
@@ -492,7 +496,7 @@ max_memory_mib = 16384
 max_disk_gib = 100
 max_ttl_seconds = 86400          # every request must set ttl_seconds <= this; unbounded VMs are rejected
 allowed_backends = ["qemu", "firecracker"]
-allowed_image_dirs = ["/var/lib/ephemera/images"]
+allowed_image_dirs = ["/var/lib/fluxvm/images"]
 ```
 
 Checked once, right after `"auto"` resolves to a concrete backend and before any disk/network work
@@ -506,23 +510,23 @@ cases (four rejections, one compliant create that actually boots) behave as docu
 ## Pause, resume, and exec
 
 ```bash
-sudo /usr/local/bin/ephemera --config /etc/ephemera.toml pause <id>
-sudo /usr/local/bin/ephemera --config /etc/ephemera.toml resume <id>
-sudo /usr/local/bin/ephemera --config /etc/ephemera.toml exec <id> -- echo hello
+sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml pause <id>
+sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml resume <id>
+sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml exec <id> -- echo hello
 ```
 
 `exec` requires `agent.enabled: true` in the VM spec (see the JSON contract below) and the guest
-image to have `ephemera-guest-agent` installed and running — build it with `cargo build --release
--p ephemera-guest-agent` and bake it into an image via `build-image`'s `copy_in`/`enable_services`
-(see "Build an image" below, and `systemd/ephemera-guest-agent.service`).
+image to have `fluxvm-guest-agent` installed and running — build it with `cargo build --release
+-p fluxvm-guest-agent` and bake it into an image via `build-image`'s `copy_in`/`enable_services`
+(see "Build an image" below, and `systemd/fluxvm-guest-agent.service`).
 
 **Guest-agent auth:** every agent-enabled VM gets a random shared-secret token (or the one you set in
 `agent.token`) burned into that VM's own disk — never the shared base image — before it boots, at
-`/etc/ephemera-guest-agent.token`. The agent checks it on every request; `eph exec`/the REST `/agent`
+`/etc/fluxvm-guest-agent.token`. The agent checks it on every request; `eph exec`/the REST `/agent`
 route supply it automatically from the VM's own record, so callers never handle it directly. This
-stops a process on the host *other than ephemera* from opening a raw vsock socket to the VM's CID and
+stops a process on the host *other than fluxvm* from opening a raw vsock socket to the VM's CID and
 running commands as root — it does not replace REST-layer auth (see below), which answers a different
-question ("can this caller reach ephemera's API at all"). A VM created before this existed, or with no
+question ("can this caller reach fluxvm's API at all"). A VM created before this existed, or with no
 token file baked into its image for another reason, still runs the agent unauthenticated — check the
 agent's own startup log line to be sure. Verified on real hardware
 (`scripts/test-guest-agent-auth.sh`): a raw, tokenless (or wrong-token) vsock request is rejected,
@@ -537,12 +541,12 @@ authoritative `GET /` state (not CPU-time heuristics — an idle guest and a pau
 CPU time, which is a false "it's paused" signal either way). `exec` over vsock works before a VM is
 ever paused, but did not survive a pause/resume cycle in testing on this Firecracker version — a
 Cloud Hypervisor VM's vsock connection *did* survive the identical pause/resume/exec sequence using
-the same client code, so this looks like a Firecracker vsock characteristic rather than an ephemera
+the same client code, so this looks like a Firecracker vsock characteristic rather than an fluxvm
 bug, but it's not something this project has a fix for.
 
 **Interactive console:** `GET /v1/vms/{id}/console?cols=&rows=` upgrades to a WebSocket relayed
 end-to-end to a real PTY-backed `/bin/sh` in the guest over the same vsock agent connection as
-`exec` (see `ephemera_vsock_client::open_shell`) — real keystrokes, real job control, verified live
+`exec` (see `fluxvm_vsock_client::open_shell`) — real keystrokes, real job control, verified live
 against a real QEMU VM (connect, `echo` a marker string, see it echoed back through the PTY).
 
 **Fixed — process isolation, not a kernel-level root cause.** For a while, roughly 1-in-3 console
@@ -567,12 +571,12 @@ disposition and `waitpid()` are process-wide, so a session leader's lifecycle ca
 listener sharing its process in ways a separate process boundary cannot. Verified live: 20/20 console
 sessions back-to-back left `exec` working afterward every time (statistically conclusive against the
 prior ~1-in-3 failure rate), including through the real WebSocket console path end-to-end, not just a
-raw vsock handshake. `zyvor-fabric`'s Ephemera driver can now safely request `agent.enabled: true` by
-default — see its own `docs/guides/vm-drivers/ephemera.md`.
+raw vsock handshake. `zyvor-fabric`'s FluxVM driver can now safely request `agent.enabled: true` by
+default — see its own `docs/guides/vm-drivers/fluxvm.md`.
 
 ## Resource control (cgroup v2)
 
-Every VM (all three backends) is migrated into its own `ephemera.slice/{id}.scope` cgroup right after
+Every VM (all three backends) is migrated into its own `fluxvm.slice/{id}.scope` cgroup right after
 launch, giving real, kernel-enforced control independent of anything a VMM's own API exposes:
 
 ```bash
@@ -597,7 +601,7 @@ insufficient privilege), resource control/metrics are unavailable for that run b
 are otherwise unaffected — a warning is logged, not a hard failure.
 
 Verified on real hardware (`scripts/test-cgroup-resources.sh`, all through the REST API against a
-running `ephemera serve`): a launched VM really lands in its own cgroup (confirmed by reading
+running `fluxvm serve`): a launched VM really lands in its own cgroup (confirmed by reading
 `cgroup.procs` directly, not just trusting the recorded path); a memory limit set via `resources` is
 really written to `memory.max` and reads back correctly; `freeze` really stops the VMM process (CPU
 time frozen with a forced busy-loop running in the guest, same technique used to verify QMP-level
@@ -610,9 +614,9 @@ A pool keeps `size` VMs booted from a template sitting `Paused`, ready to be han
 a fraction of a full `create`'s time instead of a full boot:
 
 ```bash
-sudo /usr/local/bin/ephemera --config /etc/ephemera.toml pool create --spec examples/pool.json
-sudo /usr/local/bin/ephemera --config /etc/ephemera.toml pool list
-sudo /usr/local/bin/ephemera --config /etc/ephemera.toml pool get my-pool
+sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml pool create --spec examples/pool.json
+sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml pool list
+sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml pool get my-pool
 ```
 
 Pool spec (`template` is a normal `CreateVmRequest` — its `name`/`ttl_seconds` are ignored for pool
@@ -625,7 +629,7 @@ members, which must never expire on their own while sitting idle):
   "template": {
     "name": "ignored",
     "backend": "qemu",
-    "image": "/var/lib/ephemera/images/ubuntu-agent.qcow2",
+    "image": "/var/lib/fluxvm/images/ubuntu-agent.qcow2",
     "vcpus": 2,
     "memory_mib": 2048,
     "network": {"mode": "none"},
@@ -634,7 +638,7 @@ members, which must never expire on their own while sitting idle):
 }
 ```
 
-Claim one through REST against a running `ephemera serve` daemon — the recommended way, since a
+Claim one through REST against a running `fluxvm serve` daemon — the recommended way, since a
 claim's own backfill-the-pool-back-up work runs as a background task inside that long-lived process:
 
 ```bash
@@ -643,11 +647,11 @@ curl -sS -X POST http://127.0.0.1:7788/v1/pools/my-pool/claim \
   -d '{"name": "job-123", "ttl_seconds": 900}' | jq
 ```
 
-`ephemera pool claim <name>` also exists on the CLI, but as a **one-shot process** it exits right
+`fluxvm pool claim <name>` also exists on the CLI, but as a **one-shot process** it exits right
 after printing the claimed VM — which can take its own backfill-replenishment task down with it
-mid-flight before the process exits. `ephemera pool create` avoids this by blocking until the pool is
+mid-flight before the process exits. `fluxvm pool create` avoids this by blocking until the pool is
 genuinely full before its own process exits; `pool claim` deliberately doesn't, to keep a claim fast.
-A separately-running `ephemera serve` daemon's reaper independently tops up every pool on its own
+A separately-running `fluxvm serve` daemon's reaper independently tops up every pool on its own
 schedule regardless of which process's claim under-filled it, so pool health converges either way —
 but for a claim's *own* immediate replenishment to be reliable, use REST against a running daemon.
 
@@ -666,7 +670,7 @@ it still owns with no leftover VMs or processes.
 ## Build an image like a small virt-builder
 
 ```bash
-sudo /usr/local/bin/ephemera --config /etc/ephemera.toml build-image \
+sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml build-image \
   --spec examples/build-image.json
 ```
 
@@ -678,7 +682,7 @@ Example request:
 {
   "source": "https://example.invalid/ubuntu-base.qcow2",
   "sha256": "PUT_REAL_SHA256_HERE",
-  "output": "/var/lib/ephemera/images/ubuntu-dev.qcow2",
+  "output": "/var/lib/fluxvm/images/ubuntu-dev.qcow2",
   "format": "qcow2",
   "size_gib": 20,
   "hostname": "zyvor-template",
@@ -698,14 +702,14 @@ This is how the guest agent gets baked into an image:
 
 ```json
 {
-  "source": "/var/lib/ephemera/images/ubuntu.qcow2",
-  "output": "/var/lib/ephemera/images/ubuntu-agent.qcow2",
+  "source": "/var/lib/fluxvm/images/ubuntu.qcow2",
+  "output": "/var/lib/fluxvm/images/ubuntu-agent.qcow2",
   "format": "qcow2",
   "copy_in": [
-    {"src": "/path/to/target/release/ephemera-guest-agent", "dest": "/usr/local/bin/ephemera-guest-agent"},
-    {"src": "systemd/ephemera-guest-agent.service", "dest": "/etc/systemd/system/ephemera-guest-agent.service"}
+    {"src": "/path/to/target/release/fluxvm-guest-agent", "dest": "/usr/local/bin/fluxvm-guest-agent"},
+    {"src": "systemd/fluxvm-guest-agent.service", "dest": "/etc/systemd/system/fluxvm-guest-agent.service"}
   ],
-  "enable_services": ["ephemera-guest-agent"]
+  "enable_services": ["fluxvm-guest-agent"]
 }
 ```
 
@@ -729,7 +733,7 @@ Enable it with `[catalog]` in the config:
 
 ```toml
 [catalog]
-path = "/etc/ephemera/catalog.json"
+path = "/etc/fluxvm/catalog.json"
 trusted_signers = []   # empty = signatures not required; non-empty = every entry MUST verify
 ```
 
@@ -741,15 +745,15 @@ binary or a live Fulcio/Rekor round trip — neither of which this project can v
 external network-dependent test infrastructure):
 
 ```bash
-ephemera catalog keygen
+fluxvm catalog keygen
 #   private key (keep secret, use with `catalog sign --key`): ...
 #   public key (put in config.catalog.trusted_signers): ...
 
-ephemera catalog sign \
+fluxvm catalog sign \
   --key <private-key> --name ubuntu-24.04 \
   --source https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img \
   --sha256 <sha256> --distro ubuntu --version 24.04 --arch x86_64 \
-  --catalog-file /etc/ephemera/catalog.json   # appends/updates in place; omit to just print the entry
+  --catalog-file /etc/fluxvm/catalog.json   # appends/updates in place; omit to just print the entry
 ```
 
 With `trusted_signers` set, an unsigned (or wrongly-signed) catalog entry is rejected at `create` time
@@ -759,21 +763,21 @@ never touch the API surface).
 
 **Catalog CRUD over REST** — add/remove/rename/clone/export entries without hand-editing
 `catalog.json` or going through the CLI's offline sign flow (this is what zyvor-fabric's
-`EphemeraDriver::ImageDriver` uses to replace machinectl's image-management verbs):
+`FluxVMDriver::ImageDriver` uses to replace machinectl's image-management verbs):
 
 ```bash
 # Register a new entry — source can be a local path or an http(s) URL; sha256 is computed
 # fresh from what actually lands on disk, not trusted from the caller.
 curl -sS -X POST http://127.0.0.1:7788/v1/images/catalog \
   -H 'content-type: application/json' \
-  -d '{"name": "ubuntu-24.04", "source": "/var/lib/ephemera/images/ubuntu.qcow2", "format": "qcow2"}' | jq
+  -d '{"name": "ubuntu-24.04", "source": "/var/lib/fluxvm/images/ubuntu.qcow2", "format": "qcow2"}' | jq
 
 curl -sS -X POST http://127.0.0.1:7788/v1/images/catalog/ubuntu-24.04/clone \
   -d '{"target_name": "ubuntu-24.04-staging"}' | jq
 curl -sS -X POST http://127.0.0.1:7788/v1/images/catalog/ubuntu-24.04-staging/rename \
   -d '{"new_name": "ubuntu-24.04-qa"}' | jq
 curl -sS -X POST http://127.0.0.1:7788/v1/images/catalog/ubuntu-24.04/export \
-  -d '{"path": "/var/lib/ephemera/exports/ubuntu-24.04.qcow2"}' | jq
+  -d '{"path": "/var/lib/fluxvm/exports/ubuntu-24.04.qcow2"}' | jq
 curl -sS -X DELETE http://127.0.0.1:7788/v1/images/catalog/ubuntu-24.04-qa
 ```
 
@@ -796,8 +800,8 @@ By default a VM's disk is provisioned the same way it always has been: a
 qcow2 copy-on-write overlay for QEMU, a reflinked-or-copied raw file for
 Cloud Hypervisor/Firecracker (see "What is implemented" above). Setting
 `storage` on a create request switches to one of three alternative
-provisioning backends instead — `ephemera_core::model::StorageBackend`,
-implemented in `ephemera_image::storage`:
+provisioning backends instead — `fluxvm_core::model::StorageBackend`,
+implemented in `fluxvm_image::storage`:
 
 - **`lvm-thin`** — `image` must be a `/dev/<vg>/<lv>` path to an existing
   LVM thin logical volume (in a thin pool). A fresh thin *snapshot* LV is
@@ -834,12 +838,12 @@ implemented in `ephemera_image::storage`:
   mount) after this VM's own `qemu-nbd --persistent` export was already
   running raced its write lock and failed with "Failed to get 'write' lock".
   Fixed by injecting the token before the export starts, not after.
-- **`ceph-rbd`** — `rbd clone <pool>/<image>@ephemera-base ...` and QEMU's
+- **`ceph-rbd`** — `rbd clone <pool>/<image>@fluxvm-base ...` and QEMU's
   native `rbd:` block driver (QEMU only; Cloud Hypervisor/Firecracker have
   no built-in Ceph client). Verified end to end against a real, live Rook
   Ceph cluster (the Atlas storage-control-plane project's lab: Rook v1.20.2
   + Ceph Squid v19.2.3, `rbd-nvme-prod` pool): imported a raw image as
-  `rbd-nvme-prod/ephemera-base`, protected an `ephemera-base` snapshot on
+  `rbd-nvme-prod/fluxvm-base`, protected an `fluxvm-base` snapshot on
   it, created a VM with `storage=ceph-rbd` — `rbd clone` produced a real
   `eph-<id>` clone, QEMU booted a real guest straight off
   `rbd:rbd-nvme-prod/eph-<id>:id=admin:conf=...` all the way to a login
@@ -859,7 +863,7 @@ the script's own `--help`). `ceph-rbd` isn't in that script — it was
 verified manually against the specific external Rook Ceph lab above, which
 this repo has no automated way to stand up or tear down; the recipe was:
 `rbd import` a raw image into a pool, `rbd snap create` + `rbd snap
-protect` an `ephemera-base` snapshot on it, then create a VM with
+protect` an `fluxvm-base` snapshot on it, then create a VM with
 `"storage":"ceph-rbd","image":"<pool>/<image>"`.
 
 ## REST API
@@ -867,7 +871,7 @@ protect` an `ephemera-base` snapshot on it, then create a VM with
 Start the server:
 
 ```bash
-sudo /usr/local/bin/ephemera --config /etc/ephemera.toml serve
+sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml serve
 ```
 
 Default bind address:
@@ -923,8 +927,8 @@ relaunches a `Stopped` VM from its existing disk/seed, skipping the image-clone/
 work `create` does — for a name-keyed register-then-start caller that already has a VM on disk it just
 needs running again.
 
-`GET /metrics` returns Prometheus text-exposition-format gauges: `ephemera_vms_total{status="..."}`,
-`ephemera_vms_by_backend{backend="..."}`, and `ephemera_vms_agent_enabled` — point a Prometheus
+`GET /metrics` returns Prometheus text-exposition-format gauges: `fluxvm_vms_total{status="..."}`,
+`fluxvm_vms_by_backend{backend="..."}`, and `fluxvm_vms_agent_enabled` — point a Prometheus
 `scrape_config` at it directly, no exporter needed.
 
 `GET /v1/vms/{uuid}/logs?lines=N&follow=true` streams the VM's captured console output (raw serial,
@@ -979,7 +983,7 @@ selection" above — the persisted/returned record always shows the resolved con
 {
   "name": "job-123",
   "backend": "qemu",
-  "image": "/var/lib/ephemera/images/ubuntu.qcow2",
+  "image": "/var/lib/fluxvm/images/ubuntu.qcow2",
   "vcpus": 2,
   "memory_mib": 2048,
   "disk_size_gib": 20,
@@ -1003,8 +1007,8 @@ selection" above — the persisted/returned record always shows the resolved con
 }
 ```
 
-`agent.enabled` turns on the vsock guest agent (`ephemera exec`) for this VM — the guest image must
-have `ephemera-guest-agent` installed and enabled (see "Build an image" above). `agent.port` is the
+`agent.enabled` turns on the vsock guest agent (`fluxvm exec`) for this VM — the guest image must
+have `fluxvm-guest-agent` installed and enabled (see "Build an image" above). `agent.port` is the
 AF_VSOCK port the guest listens on (not a host TCP port); it defaults to `17777` and rarely needs
 changing, since each VM already gets its own host-unique vsock CID.
 
@@ -1061,8 +1065,8 @@ its API only accepts a host device name it opens via `/dev/net/tun`, with no fd-
 
 ## Kubernetes CRD/operator
 
-`ephemera-kube` is a `DisposableVm` custom resource plus a node-local operator that reconciles them
-against a *local* `ephemera serve` instance's REST API — there's no central scheduler placing VMs
+`fluxvm-kube` is a `DisposableVm` custom resource plus a node-local operator that reconciles them
+against a *local* `fluxvm serve` instance's REST API — there's no central scheduler placing VMs
 across a fleet (that's the still-deferred "distributed node-agent" item below); each node's operator
 instance only ever acts on `DisposableVm` objects whose `spec.node` matches the node name it was
 started with (`NODE_NAME` env var), same shape as a real daemonset — see [`deploy/k8s/`](deploy/k8s/)
@@ -1076,22 +1080,22 @@ actually gone — no leaked QEMU process.
 
 ```bash
 # Generate + install the CRD once.
-ephemera-kube --print-crd | kubectl apply -f -
+fluxvm-kube --print-crd | kubectl apply -f -
 
 # Run the operator on this node (typically one instance per node, alongside
-# a local `ephemera serve`).
-NODE_NAME=$(hostname) EPHEMERA_URL=http://127.0.0.1:7788 ephemera-kube
+# a local `fluxvm serve`).
+NODE_NAME=$(hostname) FLUXVM_URL=http://127.0.0.1:7788 fluxvm-kube
 ```
 
 ```yaml
-apiVersion: ephemera.zyvor.io/v1
+apiVersion: fluxvm.zyvor.io/v1
 kind: DisposableVm
 metadata:
   name: example
 spec:
   node: worker-1          # must match some running operator's NODE_NAME
   backend: qemu
-  image: /var/lib/ephemera/images/ubuntu.qcow2
+  image: /var/lib/fluxvm/images/ubuntu.qcow2
   vcpus: 2
   memoryMib: 2048
   networkMode: none        # "none" or "user" only — tap/macvtap need a device/bridge name this CRD doesn't expose yet
@@ -1105,9 +1109,9 @@ API directly) the operator notices on its next reconcile and creates a *new* VM 
 different id, a different pid — the same "keep this existing" semantics a `Deployment` has for Pods.
 Confirmed by deleting a CR-owned VM out-of-band and watching a fresh one appear within two reconcile
 ticks, with no action taken on the CR itself. Only deleting the `DisposableVm` object itself stops
-this (see `DisposableVmStatus::phase`'s doc comment in `crates/ephemera-kube/src/crd.rs`).
+this (see `DisposableVmStatus::phase`'s doc comment in `crates/fluxvm-kube/src/crd.rs`).
 
-**Real bug found and fixed while testing this**: `ephemera-api`'s `ApiError` maps *every* error to a
+**Real bug found and fixed while testing this**: `fluxvm-api`'s `ApiError` maps *every* error to a
 generic `400 Bad Request` — there's no distinct `404` anywhere in this API. The operator's initial
 "is this VM still there" check assumed 404-on-missing (the REST-idiomatic assumption) and never
 actually fired; a VM that vanished was reported as a transient error and endlessly retried instead of
@@ -1119,62 +1123,62 @@ in-cluster); a `tap`/`macvtap` networking mode in the CRD (needs a device/bridge
 cross-node placement — the "which node should this VM land on" decision is the caller's today, made
 by setting `spec.node` directly, not something this project chooses for you.
 
-## Using Ephemera through zyvor-fabric
+## Using FluxVM through zyvor-fabric
 
-[zyvor-fabric](../zyvor-fabric) is the other primary consumer of Ephemera, and the older/more
+[zyvor-fabric](../zyvor-fabric) is the other primary consumer of FluxVM, and the older/more
 direct of the two integrations: unlike Ragnarok's Kubernetes CRD approach (see below), zyvor-fabric
-talks straight to a host's `ephemera serve` REST API (`backend/crates/ephemera-driver` +
-`ephemera-client` hand-mirror Ephemera's own DTOs rather than depending on this crate directly —
-see zyvor-fabric's `docs/guides/vm-drivers/ephemera.md`), the same API documented above under "REST
-API". Set `driver = "ephemera"` in zyvor-fabricd's config to opt into it (the default is still
+talks straight to a host's `fluxvm serve` REST API (`backend/crates/fluxvm-driver` +
+`fluxvm-client` hand-mirror FluxVM's own DTOs rather than depending on this crate directly —
+see zyvor-fabric's `docs/guides/vm-drivers/fluxvm.md`), the same API documented above under "REST
+API". Set `driver = "fluxvm"` in zyvor-fabricd's config to opt into it (the default is still
 `machinectl`/systemd-machined — CPU pinning, log streaming, and hotplug require `machinectl` until
-Ephemera gains resource-control and log-streaming endpoints of its own; see the systemd-removal
+FluxVM gains resource-control and log-streaming endpoints of its own; see the systemd-removal
 migration plan).
 
 **Getting zyvor-fabric**: zyvor-fabric's own repo is private, so its build is published here
 instead, as a self-contained Linux (x86_64) tarball — no cargo/npm required on the target
 machine — attached to this repo's
-[`zyvor-fabric-vX.Y.Z`-tagged releases](https://github.com/zyvorai/ephemera/releases). No
+[`zyvor-fabric-vX.Y.Z`-tagged releases](https://github.com/zyvorai/fluxvm/releases). No
 container image is published; install directly on the host:
 
 ```bash
-curl -LO https://github.com/zyvorai/ephemera/releases/download/zyvor-fabric-v0.1.0/zyvor-fabric-0.1.0-linux-x86_64.tar.gz
+curl -LO https://github.com/zyvorai/fluxvm/releases/download/zyvor-fabric-v0.1.0/zyvor-fabric-0.1.0-linux-x86_64.tar.gz
 tar xzf zyvor-fabric-0.1.0-linux-x86_64.tar.gz
 cd zyvor-fabric-0.1.0-linux-x86_64
 sudo ./install.sh --start
 ```
 
-The [release](https://github.com/zyvorai/ephemera/releases/tag/zyvor-fabric-v0.1.0) also carries
+The [release](https://github.com/zyvorai/fluxvm/releases/tag/zyvor-fabric-v0.1.0) also carries
 an `INSTALL.md` with a full getting-started tutorial (first login, creating your first VM,
 networking, verifying the install, upgrading). The tarball itself bundles
-`zyvor-fabricd`/`zyvorctl`, a matching Ephemera build, guestkit's vendor agents, the web dashboard,
-systemd units for both `zyvor-fabricd.service` and `ephemera.service`, and default configs --
+`zyvor-fabricd`/`zyvorctl`, a matching FluxVM build, guestkit's vendor agents, the web dashboard,
+systemd units for both `zyvor-fabricd.service` and `fluxvm.service`, and default configs --
 `install.sh` wires all of it up (see zyvor-fabric's own `scripts/build-dist.sh` for exactly what
 goes into the package and `scripts/dist-install.sh` for what the installer does). This release
 build carries a 30-day evaluation trial (existing VMs and read access stay available after it
 lapses; new writes need a current trial or license -- check remaining days via `GET /api/license`
 on the running daemon).
 
-## Using Ephemera through Ragnarok
+## Using FluxVM through Ragnarok
 
-[Ragnarok](../ragnarok) is the primary product consumer of `ephemera-kube` today — it never talks
-to a host's `ephemera serve` REST API directly; it only creates/reads/deletes `DisposableVm` CRs
-and lets the per-node operator (see "Kubernetes CRD/operator" above) do the rest. From Ephemera's
+[Ragnarok](../ragnarok) is the primary product consumer of `fluxvm-kube` today — it never talks
+to a host's `fluxvm serve` REST API directly; it only creates/reads/deletes `DisposableVm` CRs
+and lets the per-node operator (see "Kubernetes CRD/operator" above) do the rest. From FluxVM's
 side, Ragnarok is just another `DisposableVm` client with no special access — the same CRD/RBAC
 setup in `deploy/k8s/` works for it or for `kubectl apply` directly.
 
-**Ephemera is free (Apache-2.0). Ragnarok is proprietary** (signed `trial.token`
+**FluxVM is free (Apache-2.0). Ragnarok is proprietary** (signed `trial.token`
 evaluation, then a renewed JWT from sales@zyvor.dev).
 
 ### Download Ragnarok binaries (published here)
 
 Ragnarok's source repo is private, so **binary-only** trial packages are attached to this
-Ephemera repository's GitHub Releases (same pattern as zyvor-fabric), tagged `ragnarok-vX.Y.Z`:
+FluxVM repository's GitHub Releases (same pattern as zyvor-fabric), tagged `ragnarok-vX.Y.Z`:
 
 ```bash
 VER=0.5.2
-curl -LO "https://github.com/zyvorai/ephemera/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz"
-curl -LO "https://github.com/zyvorai/ephemera/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz.sha256"
+curl -LO "https://github.com/zyvorai/fluxvm/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz"
+curl -LO "https://github.com/zyvorai/fluxvm/releases/download/ragnarok-v${VER}/ragnarok-${VER}-linux-amd64.tar.gz.sha256"
 sha256sum -c "ragnarok-${VER}-linux-amd64.tar.gz.sha256"
 tar xzf "ragnarok-${VER}-linux-amd64.tar.gz"
 cd "ragnarok-${VER}-linux-amd64"
@@ -1191,31 +1195,31 @@ Requires Linux x86_64, Kubernetes, and **KubeVirt**. After the token expires ema
 in the tarball).
 
 **Customer / install guide:** [docs/ragnarok.md](docs/ragnarok.md) — install order, manuals, SSO note.
-Published manuals: [Ephemera](https://zyvor.dev/docs/ephemera-manual) · [Ragnarok](https://zyvor.dev/docs/ragnarok-manual) · [suite](https://zyvor.dev/docs/customer-manuals).
+Published manuals: [FluxVM](https://zyvor.dev/docs/fluxvm-manual) · [Ragnarok](https://zyvor.dev/docs/ragnarok-manual) · [suite](https://zyvor.dev/docs/customer-manuals).
 
-**Setup**, from Ephemera's side, is exactly "Deploy order" above — install the CRD/RBAC/DaemonSet,
-label each capable node `ragnarok.io/ephemera-capable=true`, stage images. Ragnarok has no separate
-install step for Ephemera itself; it only detects what's already there (see below).
+**Setup**, from FluxVM's side, is exactly "Deploy order" above — install the CRD/RBAC/DaemonSet,
+label each capable node `ragnarok.io/fluxvm-capable=true`, stage images. Ragnarok has no separate
+install step for FluxVM itself; it only detects what's already there (see below).
 
 **SSO / identity** is entirely Ragnarok's job (local admin, LDAP, Keycloak OIDC with optional
-in-cluster IdP proxy via Ragnarok `--with-oidc`). Ephemera does not terminate browser SSO.
-**Ephemera is free (Apache-2.0); Ragnarok is proprietary** (signed `trial.token`,
+in-cluster IdP proxy via Ragnarok `--with-oidc`). FluxVM does not terminate browser SSO.
+**FluxVM is free (Apache-2.0); Ragnarok is proprietary** (signed `trial.token`,
 then a renewed JWT from sales@zyvor.dev). Do not put Ragnarok trial signing tools
 or private keys in this repository.
 
-**What Ragnarok adds on top** (`ragnarok/backend/src/ephemera/`, REST surface in
-`routes/ephemera.rs`, UI in the frontend's `EphemeraHub` page):
+**What Ragnarok adds on top** (`ragnarok/backend/src/fluxvm/`, REST surface in
+`routes/fluxvm.rs`, UI in the frontend's `FluxVMHub` page):
 
-- `GET /api/v1/ephemera/capability` — whether the `DisposableVm` CRD is actually registered on the
+- `GET /api/v1/fluxvm/capability` — whether the `DisposableVm` CRD is actually registered on the
   connected cluster (a single `list` call, distinguishing "operator not installed" from "installed,
-  zero VMs" — see `ephemera::workload::disposable_vm_crd_available`'s doc comment for why that's not
-  as simple as checking for an empty list). Ragnarok's Ephemera Hub page shows an "operator not
+  zero VMs" — see `fluxvm::workload::disposable_vm_crd_available`'s doc comment for why that's not
+  as simple as checking for an empty list). Ragnarok's FluxVM Hub page shows an "operator not
   detected" banner instead of a broken-looking empty page when this is false — see the root
   Ragnarok README's "What works in this beta" table.
-- `GET /api/v1/ephemera/nodes` — nodes labeled `ragnarok.io/ephemera-capable=true`, for a node
-  picker in the UI. Ephemera has no scheduler (see "Kubernetes CRD/operator" above); Ragnarok's
+- `GET /api/v1/fluxvm/nodes` — nodes labeled `ragnarok.io/fluxvm-capable=true`, for a node
+  picker in the UI. FluxVM has no scheduler (see "Kubernetes CRD/operator" above); Ragnarok's
   create form is the thing choosing `spec.node`, the same way any other caller has to.
-- `GET/POST /api/v1/ephemera/vms`, `GET/DELETE /api/v1/ephemera/vms/{namespace}/{name}` — thin
+- `GET/POST /api/v1/fluxvm/vms`, `GET/DELETE /api/v1/fluxvm/vms/{namespace}/{name}` — thin
   CRUD wrappers around the CR, namespace-scoped to the calling user's RBAC (`enforce_namespace_access`).
   Ragnarok sets no fields on the CR beyond what a caller could set by hand — no Ragnarok-specific
   CRD fields or annotations exist today.
@@ -1226,18 +1230,18 @@ placement beyond letting the user pick a node from the capable-nodes list.
 
 ## Distributed node-agent
 
-`ephemera-agent` is the non-Kubernetes multi-host story — a caller talks to one central endpoint
-instead of knowing which host a VM is on, distinct from `ephemera-kube`'s per-node reconciliation
-against a *local* ephemera. One binary, two modes:
+`fluxvm-agent` is the non-Kubernetes multi-host story — a caller talks to one central endpoint
+instead of knowing which host a VM is on, distinct from `fluxvm-kube`'s per-node reconciliation
+against a *local* fluxvm. One binary, two modes:
 
 ```bash
 # Central fleet registry + create/list/delete proxy — one instance for the whole fleet.
-ephemera-agent central --listen 0.0.0.0:7799
+fluxvm-agent central --listen 0.0.0.0:7799
 
-# Per-host heartbeat client — one instance per hypervisor host, alongside a local `ephemera serve`.
-ephemera-agent node --name worker-1 \
+# Per-host heartbeat client — one instance per hypervisor host, alongside a local `fluxvm serve`.
+fluxvm-agent node --name worker-1 \
     --central http://fleet-registry:7799 \
-    --ephemera-url http://127.0.0.1:7788 \
+    --fluxvm-url http://127.0.0.1:7788 \
     --advertise-url http://worker-1.internal:7788
 ```
 
@@ -1257,28 +1261,28 @@ both hosts; a fleet-proxied delete reaps the right VM on the right host and leav
 
 **Real bugs found and fixed while testing this across two actual hosts** (bugs that are invisible
 running everything on one machine, which is exactly why this got tested on two real, separate hosts
-instead of just trusting the code): a node's heartbeat originally reported its own `--ephemera-url`
+instead of just trusting the code): a node's heartbeat originally reported its own `--fluxvm-url`
 (almost always a loopback address) straight to central — central's proxy calls for a *remote* node
 would then silently hit whatever was listening on *central's own* localhost instead, with no error at
-all. Fixed by splitting `--ephemera-url` (what this agent uses to reach its own local ephemera) from
-`--advertise-url` (what a remote central should use to reach this same ephemera — must be a real,
+all. Fixed by splitting `--fluxvm-url` (what this agent uses to reach its own local fluxvm) from
+`--advertise-url` (what a remote central should use to reach this same fluxvm — must be a real,
 externally routable address). Separately, this test script's own cleanup function first tried
-`sudo pkill -f "target/release/ephemera --config ..."` over SSH — which matched **its own** command
+`sudo pkill -f "target/release/fluxvm --config ..."` over SSH — which matched **its own** command
 line (the pattern string is a substring of the `pkill` invocation's own argv) and SIGTERMed itself
-before it ever reached the real target process, leaving the actual `ephemera serve` running every
+before it ever reached the real target process, leaving the actual `fluxvm serve` running every
 time with no error surfaced. Fixed with the standard `[t]arget/...` bracket-escape idiom that keeps
 `pgrep`/`pkill -f` from matching their own invocation.
 
 **Not yet done**: TLS/auth between node agents and central (both sides currently trust any caller who
 can reach the port — fine for a private management network, not for anything exposed further);
-persisting fleet registry state (an `ephemera-agent central` restart forgets every node until their
+persisting fleet registry state (an `fluxvm-agent central` restart forgets every node until their
 next heartbeat, ~`--interval-secs` seconds later); and richer placement policies beyond
 fewest-VMs-wins (no CPU/memory-aware bin-packing, no per-VM node affinity/anti-affinity).
 
 ## State layout
 
 ```text
-/var/lib/ephemera/
+/var/lib/fluxvm/
   vms.json
   vms.lock
   downloads/
@@ -1302,7 +1306,7 @@ snapshot LV (`/dev/<vg>/eph-<id>`) and an RBD clone (`rbd:<pool>/eph-<id>:...`) 
 both torn down by `delete` via `VmRecord.lvm_lv`/parsing the `rbd:` URI, not by deleting
 anything under `instances/<uuid>/`.
 
-`vms.lock` coordinates `vms.json` reads/writes across concurrent `ephemera` processes (each CLI
+`vms.lock` coordinates `vms.json` reads/writes across concurrent `fluxvm` processes (each CLI
 invocation is a separate process, not just a separate task inside `serve`) via an OS-level `flock` —
 without it, two VMs created at the same moment could silently lose one's record, or both get
 assigned the same vsock CID.
@@ -1311,16 +1315,17 @@ assigned the same vsock CID.
 
 1. **Firecracker jailer's own `--cgroup`/`--resource-limit` flags** — not wired up, but superseded in practice: every VM (all three backends, not just jailed Firecracker) already gets real cgroup v2 resource control (CPU/memory/IO/pids/cpuset, freeze/thaw, stats, PSI pressure) independent of the jailer — see "Resource control (cgroup v2)" above.
 2. **Network namespace policy** — one namespace per VM (veth + NAT + internal bridge) is already implemented and opt-in per VM (see "Network namespaces" above); still missing: nftables instead of one flat iptables MASQUERADE rule per VM, and real IPAM (subnets are derived deterministically from the VM id rather than tracked/reused, a documented theoretical-collision tradeoff).
-3. **Snapshots** — full VM state + disk snapshots per backend, for restoring a specific VM's exact prior state (as opposed to warm pools, already implemented, which speed up starting a *fresh* VM from a template — see "Warm VM pools" above).
+3. **Snapshots** — full VM state + disk snapshots per backend, for restoring a specific VM's exact prior state (as opposed to warm pools, already implemented, which speed up starting a *fresh* VM from a template — see "Warm VM pools" above). This is also the foundation for template memory restore (tens-of-ms agent sandboxes); see [docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md).
 4. **Storage abstraction** — already implemented and fully verified: qcow2 CoW overlay and raw reflink (the always-on defaults, per VMM backend), plus opt-in LVM thin snapshots, NBD-exported disks, and Ceph RBD — all verified booting real guests on real hardware, Ceph RBD against a real Rook Ceph cluster; see "Storage backends" below. Not done: NVMe-local as a distinct backend (a local raw file/block device already gets NVMe's real performance with no extra abstraction needed — reflink/LVM already cover that case).
 5. **Image catalog** — already implemented: named/checksummed/Ed25519-signed entries, distro/version/arch metadata (see "Image catalog & signing" above). Not done: a cosign/Sigstore option specifically, for shops standardized on that instead of this project's own signing scheme.
 6. **Policy** — allowed networking modes are still unrestricted (max vCPU/RAM/disk/TTL and allowed backends/image directories are already implemented; see "Policy (admission limits)" above).
 7. **Auth** — mTLS/OIDC, tenant IDs and audit events. Bearer-token REST auth/RBAC (admin/read-only) and a per-VM authenticated guest-agent protocol are already implemented; see "Auth / RBAC" and "Pause, resume, and exec" above.
 8. **Observability** — tracing, per-VM boot timing and failure reasons (a basic Prometheus `/metrics` endpoint — VM counts by status/backend, agent-enabled count — is already implemented; see the REST API section).
-9. **Kubernetes CRD/operator** — already implemented and verified against a real k3s cluster: `DisposableVm` CRD + node-local operator (`ephemera-kube`); see "Kubernetes CRD/operator" above. Not done: packaging it as a real container image/daemonset manifest, a tap/macvtap networking mode in the CRD, and cross-node placement.
-10. **Distributed node-agent** — already implemented and verified across two real, physically separate hosts: `ephemera-agent` (the per-*host* one, not `ephemera-guest-agent`) central registry + node heartbeat client; see "Distributed node-agent" above. Not done: TLS/auth between nodes and central, persisted fleet state, and placement policies beyond fewest-VMs-wins.
+9. **Kubernetes CRD/operator** — already implemented and verified against a real k3s cluster: `DisposableVm` CRD + node-local operator (`fluxvm-kube`); see "Kubernetes CRD/operator" above. Not done: packaging it as a real container image/daemonset manifest, a tap/macvtap networking mode in the CRD, and cross-node placement.
+10. **Distributed node-agent** — already implemented and verified across two real, physically separate hosts: `fluxvm-agent` (the per-*host* one, not `fluxvm-guest-agent`) central registry + node heartbeat client; see "Distributed node-agent" above. Not done: TLS/auth between nodes and central, persisted fleet state, and placement policies beyond fewest-VMs-wins.
 11. **Scheduler placement** — NUMA awareness, CPU pinning, hugepages and GPU/VFIO assignment.
 12. **Windows path** — QEMU/Cloud Hypervisor only; UEFI, virtio-win injection, sysprep and unattend support.
+13. **AI-agent sandbox parity** (optional product track; see [docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md)) — after full snapshots: agent-oriented REST + sandbox HTTP proxy, L7 egress allowlist with credential injection, AutoPause/wake-on-request, and multi-node shared control-plane state beyond the fleet agent.
 
 "auto" backend selection is already implemented — see "Auto backend selection" above.
 
@@ -1341,4 +1346,4 @@ assigned the same vsock CID.
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Copyright 2026 Zyvor.
 
-Part of the Zyvor platform (see [zyvor-fabric](#using-ephemera-through-zyvor-fabric) and [Ragnarok](#using-ephemera-through-ragnarok) above). More at **[zyvor.dev](https://zyvor.dev?utm_source=github&utm_medium=ephemera)**.
+Part of the Zyvor platform (see [zyvor-fabric](#using-fluxvm-through-zyvor-fabric) and [Ragnarok](#using-fluxvm-through-ragnarok) above). More at **[zyvor.dev](https://zyvor.dev?utm_source=github&utm_medium=fluxvm)**.

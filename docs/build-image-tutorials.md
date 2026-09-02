@@ -1,6 +1,6 @@
-# Building custom OS images with `ephemera build-image`
+# Building custom OS images with `fluxvm build-image`
 
-`ephemera build-image` takes a base disk image and applies customizations —
+`fluxvm build-image` takes a base disk image and applies customizations —
 hostname, package installs, arbitrary commands, SSH-key injection, file
 copy-in, and systemd service enablement — to produce a new, ready-to-boot
 image. Everything runs through [`guestkit`](https://github.com/zyvorai/guestkit)
@@ -32,7 +32,7 @@ For each field in the request:
 
 `packages` is the one field that needs real outbound networking from
 whatever host you run `build-image` on — the guest's package manager has to
-actually reach its package repositories. `ephemera build-image` handles this
+actually reach its package repositories. `fluxvm build-image` handles this
 automatically: it stages a working `/etc/resolv.conf` into the guest for the
 duration of the install (a stock cloud image's own `resolv.conf` is usually
 a dangling symlink that only resolves under a running systemd instance) and
@@ -71,24 +71,24 @@ the actual VM backends are involved in building an image.
 
 ```json
 {
-  "source": "/var/lib/ephemera/images/ubuntu-noble.qcow2",
-  "output": "/var/lib/ephemera/images/ubuntu-dev.qcow2",
+  "source": "/var/lib/fluxvm/images/ubuntu-noble.qcow2",
+  "output": "/var/lib/fluxvm/images/ubuntu-dev.qcow2",
   "format": "qcow2",
   "hostname": "ubuntu-dev",
   "packages": ["tree", "jq", "qemu-guest-agent"],
   "commands": [
-    "touch /etc/provisioned-by-ephemera"
+    "touch /etc/provisioned-by-fluxvm"
   ],
   "ssh_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@example.com",
   "copy_in": [
-    {"src": "/path/to/target/release/ephemera-guest-agent", "dest": "/usr/local/bin/ephemera-guest-agent"}
+    {"src": "/path/to/target/release/fluxvm-guest-agent", "dest": "/usr/local/bin/fluxvm-guest-agent"}
   ],
   "enable_services": ["qemu-guest-agent", "cron"]
 }
 ```
 
 ```bash
-sudo ephemera build-image --spec ubuntu-dev.json
+sudo fluxvm build-image --spec ubuntu-dev.json
 ```
 
 Notes:
@@ -102,13 +102,13 @@ Notes:
 
 ```json
 {
-  "source": "/var/lib/ephemera/images/rocky9.qcow2",
-  "output": "/var/lib/ephemera/images/rocky9-dev.qcow2",
+  "source": "/var/lib/fluxvm/images/rocky9.qcow2",
+  "output": "/var/lib/fluxvm/images/rocky9-dev.qcow2",
   "format": "qcow2",
   "hostname": "rocky-dev",
   "packages": ["tree", "jq"],
   "commands": [
-    "touch /etc/provisioned-by-ephemera"
+    "touch /etc/provisioned-by-fluxvm"
   ],
   "ssh_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@example.com",
   "enable_services": ["crond"]
@@ -116,7 +116,7 @@ Notes:
 ```
 
 ```bash
-sudo ephemera build-image --spec rocky-dev.json
+sudo fluxvm build-image --spec rocky-dev.json
 ```
 
 Notes:
@@ -132,13 +132,13 @@ Notes:
 
 ```json
 {
-  "source": "/var/lib/ephemera/images/arch.qcow2",
-  "output": "/var/lib/ephemera/images/arch-dev.qcow2",
+  "source": "/var/lib/fluxvm/images/arch.qcow2",
+  "output": "/var/lib/fluxvm/images/arch-dev.qcow2",
   "format": "qcow2",
   "hostname": "arch-dev",
   "packages": ["tree", "jq"],
   "commands": [
-    "touch /etc/provisioned-by-ephemera"
+    "touch /etc/provisioned-by-fluxvm"
   ],
   "ssh_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@example.com",
   "enable_services": ["sshd"]
@@ -146,7 +146,7 @@ Notes:
 ```
 
 ```bash
-sudo ephemera build-image --spec arch-dev.json
+sudo fluxvm build-image --spec arch-dev.json
 ```
 
 Notes — Arch needs two things every other distro here doesn't, and
@@ -176,7 +176,7 @@ same way it was built — by mounting it directly:
 
 ```bash
 sudo modprobe nbd max_part=16
-sudo qemu-nbd -c /dev/nbd0 /var/lib/ephemera/images/ubuntu-dev.qcow2
+sudo qemu-nbd -c /dev/nbd0 /var/lib/fluxvm/images/ubuntu-dev.qcow2
 sudo partprobe /dev/nbd0 && sudo udevadm settle
 sudo mount /dev/nbd0p1 /mnt          # partition number varies by image layout
 cat /mnt/etc/hostname

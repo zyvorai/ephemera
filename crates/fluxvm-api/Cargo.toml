@@ -1,0 +1,33 @@
+# Copyright 2026 Zyvor
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "fluxvm-api"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "REST API for Zyvor FluxVM"
+
+[dependencies]
+fluxvm-core = { path = "../fluxvm-core" }
+fluxvm-scheduler = { path = "../fluxvm-scheduler" }
+fluxvm-image = { path = "../fluxvm-image" }
+fluxvm-network = { path = "../fluxvm-network" }
+fluxvm-vsock-client = { path = "../fluxvm-vsock-client" }
+anyhow = "1"
+async-stream = "0.3"
+axum = { version = "0.8", features = ["ws"] }
+bytes = "1"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["fs", "io-util", "time"] }
+tower-http = { version = "0.6", features = ["trace"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
