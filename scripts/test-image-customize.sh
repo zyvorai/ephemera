@@ -2,12 +2,11 @@
 # Copyright 2026 Zyvor
 # SPDX-License-Identifier: Apache-2.0
 
-# Real-hardware regression test for `fluxvm build-image`'s guestkit-based
-# customization path (fluxvm_image::customize_image) — every field of
-# BuildImageRequest that mutates the guest filesystem: hostname, packages,
-# commands, ssh_key, copy_in, enable_services. No libguestfs/virt-customize
-# involved; this mounts the base image via qemu-nbd + chroot, exactly what
-# `fluxvm build-image` itself does.
+# Real-hardware regression for `fluxvm build-image` via **guestkit only**
+# (fluxvm_image::customize_image) — every BuildImageRequest field that mutates
+# the guest filesystem: hostname, packages, commands, ssh_key, copy_in,
+# enable_services. Never libguestfs / virt-customize / guestfish — guestkit
+# mounts with qemu-nbd and runs in chroot, same as production `build-image`.
 #
 # Proves:
 # - `fluxvm build-image` accepts a spec exercising every customization

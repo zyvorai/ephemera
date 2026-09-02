@@ -8,9 +8,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# /run/netns must exist before ProtectSystem namespaces are applied, or
-# systemd fails start with status 226/NAMESPACE (ReadWritePaths=/run/netns).
-ExecStartPre=/usr/bin/mkdir -p /run/netns /run/fluxvm /var/lib/fluxvm
+# RuntimeDirectory/StateDirectory create paths before ProtectSystem mount
+# namespaces are applied. A plain ExecStartPre mkdir races and fails with
+# status 226/NAMESPACE when ReadWritePaths points at missing dirs.
+RuntimeDirectory=fluxvm
+StateDirectory=fluxvm
+ExecStartPre=/usr/bin/mkdir -p /run/netns
 ExecStart=/usr/local/bin/fluxvm --config /etc/fluxvm.toml serve
 Restart=on-failure
 RestartSec=2

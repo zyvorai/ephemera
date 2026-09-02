@@ -14,10 +14,10 @@ Build and customize guest OS images for disposable VMs.
 `fluxvm build-image` takes a base disk image and applies customizations —
 hostname, package installs, arbitrary commands, SSH-key injection, file
 copy-in, and systemd service enablement — to produce a new, ready-to-boot
-image. It does this through [GuestKit](/guestkit) mounting the image
-directly with `qemu-nbd` and running commands in a `chroot`. There's no
-libguestfs appliance and **no VM boot involved**, which means `build-image`
-doesn't need `/dev/kvm` at all — only root and the `nbd` kernel module.
+image. It does this through [GuestKit](/guestkit) (`qemu-nbd` + `chroot`).
+Use **GuestKit only** — never libguestfs, `virt-customize`, or `guestfish`.
+There is **no VM boot**, so `build-image` doesn't need `/dev/kvm` — only root
+and the `nbd` kernel module.
 
 This page walks through the three package-manager families `build-image`
 supports: Debian/Ubuntu (`apt`), RHEL-family (`dnf`/`tdnf`/`yum`), and Arch

@@ -104,18 +104,20 @@ pub async fn build_image(cfg: &Config, req: &BuildImageRequest) -> Result<BuildI
 }
 
 /// Applies every customization field on `req` (`copy_in`, `enable_services`,
-/// `hostname`, `packages`, `commands`, `ssh_key`) in one `guestkit` session —
-/// qemu-nbd mount + chroot, no libguestfs appliance. `Guestfs`'s methods are
-/// synchronous/blocking, so this runs on a blocking-pool thread rather than
-/// stalling the async runtime for however long the mount+customize takes.
+/// `hostname`, `packages`, `commands`, `ssh_key`) in one **guestkit** session
+/// (`qemu-nbd` mount + chroot). Do **not** use libguestfs / virt-customize /
+/// guestfish — FluxVM image work goes through guestkit only. `Guestfs`
+/// methods are synchronous/blocking, so this runs on a blocking-pool thread
+/// rather than stalling the async runtime for however long the mount+customize
+/// takes.
 ///
 /// **Known limitation**: `guestkit::Guestfs::command` chroots without
 /// bind-mounting `/proc`, `/sys`, or `/dev` from the host first (unlike a
-/// real booted appliance). Simple packages install fine; a package whose
+/// full booted guest). Simple packages install fine; a package whose
 /// postinst script depends on `/proc` (common for kernel/systemd-adjacent
-/// packages) can fail here where a full-appliance tool wouldn't. No
-/// workaround today beyond passing an equivalent `commands` entry that
-/// bind-mounts what a specific package needs before installing it.
+/// packages) can fail here. No workaround today beyond passing an equivalent
+/// `commands` entry that bind-mounts what a specific package needs before
+/// installing it.
 async fn customize_image(image: PathBuf, req: BuildImageRequest) -> Result<()> {
     tokio::task::spawn_blocking(move || customize_image_blocking(&image, &req))
         .await
@@ -140,7 +142,7 @@ fn depth_ordered_mounts(mounts: HashMap<String, String>) -> Vec<(String, String)
 fn customize_image_blocking(image: &Path, req: &BuildImageRequest) -> Result<()> {
     use guestkit::Guestfs;
 
-    let mut g = Guestfs::new().context("creating guestfs handle")?;
+    let mut g = Guestfs::new().context("creating guestkit handle")?;
     g.add_drive(image).with_context(|| format!("adding drive {}", image.display()))?;
     g.launch().context("launching guestfs")?;
 
@@ -317,7 +319,7 @@ fn with_staged_mtab(
 
 /// Authorizes `key` for root login by appending it to
 /// `/root/.ssh/authorized_keys`, creating the file/directory if needed.
-/// Matches the prior `virt-customize --ssh-inject root:file:...` behavior.
+/// Inject an SSH public key into the guest's `authorized_keys` via guestkit.
 fn inject_ssh_key(g: &mut guestkit::Guestfs, key: &str) -> Result<()> {
     g.command(&["mkdir", "-p", "/root/.ssh"]).context("creating /root/.ssh")?;
     g.command(&["chmod", "700", "/root/.ssh"]).context("chmod /root/.ssh")?;
@@ -350,7 +352,7 @@ fn inject_guest_agent_token_blocking(disk: &Path, token: &str) -> Result<()> {
     use fluxvm_guest_protocol::TOKEN_FILE_PATH;
     use guestkit::Guestfs;
 
-    let mut g = Guestfs::new().context("creating guestfs handle")?;
+    let mut g = Guestfs::new().context("creating guestkit handle")?;
     if std::env::var("GUESTKIT_DEBUG").is_ok() {
         g.set_debug(true);
         g.set_trace(true);

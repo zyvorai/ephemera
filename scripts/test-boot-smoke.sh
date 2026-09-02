@@ -121,13 +121,21 @@ else
 fi
 
 section "The VMM process is real and the guest is actually booting"
-sleep 8
+# Cloud images often need >8s before serial console shows a kernel banner.
+sleep 20
 if kill -0 "$VM_PID" 2>/dev/null; then
     pass "qemu-system-x86_64 process ${VM_PID} is alive"
 else
     fail "qemu-system-x86_64 process ${VM_PID} is not running"
 fi
 LOG="${TMP}/state/instances/${VM_ID}/console.log"
+# Poll a bit longer if the first check races serial output.
+for _ in 1 2 3 4 5; do
+    if [ -f "$LOG" ] && grep -qE 'Linux version|systemd\[1\]|Reached target|Started ' "$LOG" 2>/dev/null; then
+        break
+    fi
+    sleep 3
+done
 if [ -f "$LOG" ] && grep -qE 'Linux version|systemd\[1\]|Reached target|Started ' "$LOG" 2>/dev/null; then
     pass "console log shows a real kernel/systemd boot sequence"
 else

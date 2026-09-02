@@ -382,12 +382,13 @@ SUDO=""
 [ "$(id -u)" -ne 0 ] && SUDO="sudo"
 source "$HOME/.cargo/env" 2>/dev/null || true
 cd "${REMOTE_STAGING}"
-cargo build --release -p fluxvm-cli -p fluxvm-guest-agent 2>&1 | tail -8
+cargo build --release -p fluxvm-cli -p fluxvm-guest-agent -p fluxvm-hypervisor 2>&1 | tail -20
 $SUDO install -m755 target/release/fluxvm /usr/local/bin/fluxvm
+$SUDO install -m755 target/release/fluxvm-hypervisor /usr/local/bin/fluxvm-hypervisor
 [ -f /etc/fluxvm.toml ] || $SUDO install -m644 config.example.toml /etc/fluxvm.toml
 $SUDO install -m644 systemd/fluxvm.service /etc/systemd/system/fluxvm.service
 $SUDO systemctl daemon-reload 2>/dev/null || true
-echo "Installed: $(fluxvm --version 2>/dev/null || echo ok)"
+echo "Installed: $(fluxvm --version 2>/dev/null || echo ok) + fluxvm-hypervisor"
 REMOTE
 }
 
@@ -414,7 +415,7 @@ REMOTE
 # to them by their stored PID on the next `serve` startup, so already
 # -running VMs are not disrupted.
 restart_service() {
-    _ssh bash <<'REMOTE'
+    _ssh env REMOTE_STAGING="${REMOTE_DIR}" bash <<'REMOTE'
 set -e
 SUDO=""
 [ "$(id -u)" -ne 0 ] && SUDO="sudo"
@@ -432,9 +433,13 @@ if [ ! -f /etc/qemu/bridge.conf ]; then
     printf 'allow all\n' | $SUDO tee /etc/qemu/bridge.conf >/dev/null
     echo "Created /etc/qemu/bridge.conf (allow all)"
 fi
+# Ensure state/run dirs exist before first start (ProtectSystem + ReadWritePaths).
+$SUDO install -d -m755 /var/lib/fluxvm /run/fluxvm /run/netns
+$SUDO install -m644 "${REMOTE_STAGING}/systemd/fluxvm.service" /etc/systemd/system/fluxvm.service
+$SUDO systemctl daemon-reload
 $SUDO systemctl enable fluxvm 2>/dev/null || true
 $SUDO systemctl restart fluxvm
-for i in 1 2 3 4 5; do
+for i in 1 2 3 4 5 6 7 8 9 10; do
     $SUDO systemctl is-active --quiet fluxvm && break
     sleep 1
 done

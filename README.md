@@ -231,7 +231,7 @@ project (path dep from `fluxvm-image`) for offline image customization — see
 - Console log path per VM.
 - Control sockets: QMP, Cloud Hypervisor API socket, Firecracker API socket.
 - Image download/cache + SHA-256 verification.
-- Image build customization, all via `guestkit` (no libguestfs appliance): package install, hostname, arbitrary commands, SSH-key injection, `copy_in` for injecting files (e.g. the guest agent binary), and `enable_services` for enabling systemd units.
+- Image build customization via **guestkit only** (`qemu-nbd` + chroot — never libguestfs / virt-customize / guestfish): package install, hostname, arbitrary commands, SSH-key injection, `copy_in` for injecting files (e.g. the guest agent binary), and `enable_services` for enabling systemd units.
 - systemd units and one-command host bootstrap (installs QEMU tooling, Cloud Hypervisor, and Firecracker).
 - SSH/rsync remote deploy script with full and quick profiles.
 - End-to-end networking smoke test (QEMU user-mode NAT, TAP+bridge+DHCP, and macvtap, all SSH-verified).
@@ -749,8 +749,9 @@ Example request:
 ```
 
 `copy_in` places files directly into the image and `enable_services` runs `systemctl enable` for
-each named unit — both, like every other customization field, done via `guestkit` mounting the
-image directly with `qemu-nbd` (no libguestfs appliance). Neither needs outbound networking; the
+each named unit — both, like every other customization field, done via **guestkit**
+(`qemu-nbd` + chroot). Do not use libguestfs / virt-customize / guestfish. Neither
+`copy_in` nor `enable_services` needs outbound networking; the
 `packages` field does — it runs the guest's own package manager (`apt`/`dnf`/`tdnf`/`yum`/`pacman`,
 auto-detected) inside a chroot, temporarily staging the host's `/etc/resolv.conf` into the guest for
 DNS resolution (a stock cloud image's own `/etc/resolv.conf` is normally a dangling symlink that

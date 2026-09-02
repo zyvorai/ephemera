@@ -4,10 +4,9 @@
 hostname, package installs, arbitrary commands, SSH-key injection, file
 copy-in, and systemd service enablement — to produce a new, ready-to-boot
 image. Everything runs through [`guestkit`](https://github.com/zyvorai/guestkit)
-mounting the image directly with `qemu-nbd` and running commands in a
-`chroot`. There's no libguestfs appliance and **no VM boot involved** — this
-means `build-image` doesn't need `/dev/kvm` at all, only root and the `nbd`
-kernel module.
+(`qemu-nbd` mount + `chroot`). Use **guestkit only** — never libguestfs,
+`virt-customize`, or `guestfish`. There is **no VM boot** either, so
+`build-image` doesn't need `/dev/kvm`, only root and the `nbd` kernel module.
 
 This doc is a set of copy-pasteable, real-hardware-verified tutorials for the
 three package-manager families `build-image` supports: Debian/Ubuntu

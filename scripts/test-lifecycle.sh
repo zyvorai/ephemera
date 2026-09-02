@@ -96,10 +96,16 @@ trap 'rm -rf "$TMP"' EXIT
 if [ -z "$IMAGE" ]; then
     IMAGE="${STATE_DIR}/images/fluxvm-lifecycle-test.qcow2"
     if [ ! -f "$IMAGE" ]; then
-        section "Building a test image with the guest agent baked in"
+        section "Building a test image with the guest agent baked in (guestkit)"
+        # Prefer a local cloud image when present — avoids a multi-GB download
+        # and still goes through fluxvm → guestkit customize.
+        local_base="/var/lib/fluxvm/images/ubuntu-noble-minimal.img"
+        if [ ! -f "$local_base" ]; then
+            local_base="https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img"
+        fi
         cat > "${TMP}/build.json" <<JSON
 {
-  "source": "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img",
+  "source": "${local_base}",
   "output": "${IMAGE}",
   "format": "qcow2",
   "copy_in": [
@@ -110,7 +116,7 @@ if [ -z "$IMAGE" ]; then
 }
 JSON
         eph build-image --spec "${TMP}/build.json" >/dev/null
-        pass "test image built: ${IMAGE}"
+        pass "test image built via guestkit: ${IMAGE}"
     fi
 fi
 
