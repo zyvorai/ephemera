@@ -15,12 +15,14 @@
 ---
 
 **Disposable Compute Engine** — create secure, isolated, short-lived virtual machines using
-Firecracker, Cloud Hypervisor, and QEMU/KVM from one Rust-native control plane.
+Firecracker, Cloud Hypervisor, QEMU/KVM, and the in-tree FluxVM hypervisor from one Rust-native
+control plane. Repository: [github.com/zyvorai/fluxvm](https://github.com/zyvorai/fluxvm).
 
 - **QEMU/KVM** — broad guest/device compatibility, qcow2 CoW overlays, QMP socket.
 - **Cloud Hypervisor** — Rust VMM for modern cloud workloads, direct-kernel or firmware boot.
 - **Firecracker** — microVM backend using a Linux kernel + raw root filesystem.
-- **FluxVM hypervisor** (`fluxvm-hypervisor`) — in-tree lightweight KVM microVMM (agent-sandbox track).
+- **FluxVM hypervisor** (`backend: "flux-vm"`, binary `fluxvm-hypervisor`) — agent-sandbox track:
+  memory snapshots, `/v1/sandboxes`, guest HTTP proxy + AutoResume, L7 egress, AutoPause, `/console`.
 
 It also contains a small **virt-builder-style image pipeline**: use a local/HTTP base image, verify SHA-256, convert/resize it, and customize it before first boot.
 
@@ -121,6 +123,7 @@ Offline disk certify/repair stays in **[GuestKit](https://github.com/zyvorai/gue
 - [Create a QEMU disposable VM](#create-a-qemu-disposable-vm)
 - [Create a Cloud Hypervisor VM](#create-a-cloud-hypervisor-vm)
 - [Create a Firecracker microVM](#create-a-firecracker-microvm)
+- [Create a FluxVm agent sandbox](#create-a-fluxvm-agent-sandbox)
 - [Firecracker jailer](#firecracker-jailer-chroot-uidgid-isolation-cgroups)
 - [Auto backend selection](#auto-backend-selection)
 - [Policy (admission limits)](#policy-admission-limits)
@@ -147,19 +150,19 @@ Offline disk certify/repair stays in **[GuestKit](https://github.com/zyvorai/gue
 ```text
                      +-------------------------+
  CLI / REST -------->| Rust VmManager          |
-                     | state + TTL reaper      |
+                     | state + TTL + sandboxes |
                      +------------+------------+
                                   |
-               +------------------+------------------+
-               |                  |                  |
-        +------v------+    +------v-------+   +------v------+
-        | QEMU/KVM    |    | Cloud        |   | Firecracker |
-        | qcow2 CoW   |    | Hypervisor   |   | raw rootfs  |
-        +------+------+    +------+-------+   +------+------+ 
-               |                  |                  |
-               +---------+--------+------------------+
-                         |
-              KVM + TAP/bridge + Linux host
+     +-------------+--------------+--------------+--------------+
+     |             |              |              |              |
+ +---v---+   +-----v-----+  +-----v------+  +----v-------------+
+ | QEMU  |   | Cloud     |  |Firecracker |  | FluxVM hypervisor|
+ | qcow2 |   | Hypervisor|  | raw rootfs |  | (agent sandboxes)|
+ +---+---+   +-----+-----+  +-----+------+  +----+-------------+
+     |             |              |              |
+     +------+------+--------------+--------------+
+            |
+     KVM + TAP/bridge + Linux host
 
 Image path:
 base image -> SHA256 -> qemu-img -> customize -> reusable template
@@ -177,12 +180,12 @@ crates/
 ├── fluxvm-core                 domain types, config, VmBackend trait
 ├── fluxvm-cgroup                cgroup v2 resource control (cpu/memory/io/freezer/pressure/cpuset)
 ├── fluxvm-storage               VM-record state persistence
-├── fluxvm-network               TAP/bridge network preparation
-├── fluxvm-image                 image build/clone + cloud-init seed generation
+├── fluxvm-network               TAP/bridge, netns, sandbox egress + nftables dataplane
+├── fluxvm-image                 image build/clone + cloud-init seed + OCI→template
 ├── fluxvm-qemu                  QEMU/KVM backend
 ├── fluxvm-cloud-hypervisor      Cloud Hypervisor backend
 ├── fluxvm-firecracker           Firecracker backend
-├── fluxvm-hypervisor            in-tree lightweight KVM microVMM (`fluxvm-hypervisor` binary)
+├── fluxvm-hypervisor            in-tree microVMM + `FluxVmBackend` (`fluxvm-hypervisor` binary)
 ├── fluxvm-guest-protocol        wire types shared by the guest agent and its host client
 ├── fluxvm-guest-agent           in-guest AF_VSOCK agent binary (ping/exec/shutdown)
 ├── fluxvm-vsock-client          host-side vsock dialing (native for QEMU, UDS proxy for CH/Firecracker)
@@ -290,12 +293,21 @@ binary, verify its SHA-256 digest, and `install` it to `/usr/local/bin` (overrid
 
 ## Build
 
+```bash
+git clone https://github.com/zyvorai/fluxvm.git
+cd fluxvm
+```
+
+`fluxvm-image` depends on a sibling [`guestkit`](https://github.com/zyvorai/guestkit) checkout
+(path `../../../guestkit` from `crates/fluxvm-image` — i.e. clone `guestkit` next to `fluxvm`).
+
 Use a current stable Rust toolchain. This is a Cargo workspace; `cargo build` builds every crate,
 producing the `fluxvm` CLI at `target/release/fluxvm`:
 
 ```bash
 cargo build --release
 sudo install -m 0755 target/release/fluxvm /usr/local/bin/fluxvm
+sudo install -m 0755 target/release/fluxvm-hypervisor /usr/local/bin/fluxvm-hypervisor
 sudo install -m 0644 config.example.toml /etc/fluxvm.toml
 ```
 
@@ -432,6 +444,49 @@ sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml create \
 
 Firecracker does not use BIOS/UEFI in this flow. The request supplies the Linux kernel and the manager supplies a raw block rootfs.
 
+## Create a FluxVm agent sandbox
+
+The FluxVm backend (`"backend": "flux-vm"`) is the AI-agent sandbox track. `fluxvm-hypervisor`
+orchestrates a real Linux guest (Firecracker as the KVM engine today) and exposes pause/resume,
+memory+disk snapshots, and sandbox-oriented REST on top of the normal VM lifecycle.
+
+```bash
+# Build installs fluxvm-hypervisor next to fluxvm (see Build above).
+sudo /usr/local/bin/fluxvm --config /etc/fluxvm.toml create \
+  --spec examples/fluxvm.json
+
+# Or via the sandbox API (same backend; returns sandbox-oriented JSON):
+curl -sS -X POST http://127.0.0.1:7788/v1/sandboxes \
+  -H 'Content-Type: application/json' \
+  -d @examples/fluxvm.json
+```
+
+Optional `[sandbox]` in `/etc/fluxvm.toml` (see `config.example.toml`):
+
+```toml
+[sandbox]
+autopause_idle_secs = 300
+autopause_scan_secs = 10
+egress_allow_domains = ["api.openai.com", ".github.com"]
+templates_dir = "/var/lib/fluxvm/templates"
+egress_proxy_listen = "127.0.0.1:18080"
+```
+
+Useful routes once `fluxvm serve` is up:
+
+| Route | Purpose |
+|-------|---------|
+| `POST/GET /v1/sandboxes` | Create / list sandboxes |
+| `POST /v1/sandboxes/{id}/snapshot` | Memory+disk snapshot |
+| `POST /v1/sandboxes/{id}/fs/read` · `…/fs/write` | Guest filesystem |
+| `POST /v1/sandboxes/{id}/process` | Run a process in the guest |
+| `ANY /v1/sandboxes/{id}/http/{port}/{*path}` | Reverse-proxy into guest (AutoResume) |
+| `ANY /sandbox/{id}/{*path}` | Same proxy, default guest port 8080 |
+| `GET /console` | Lightweight ops UI |
+
+For multi-node shared sandbox index, set `FLUXVM_SANDBOX_STATE_URL` (Redis). Capability matrix:
+[docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md).
+
 ## Firecracker jailer (chroot, uid/gid isolation, cgroups)
 
 Opt-in, off by default, config-only (no per-VM flag) — every Firecracker VM either goes through
@@ -474,6 +529,8 @@ start of `create` (the resolved value — never `"auto"` — is what's persisted
    `cloud_hypervisor_firmware` is set in the config.
 3. otherwise **QEMU** — the only one of the three that boots from just a disk image, via its own
    BIOS/UEFI, with no kernel or firmware required.
+
+`"backend": "flux-vm"` is never chosen by `auto` — set it explicitly for the agent-sandbox track.
 
 ```json
 { "name": "auto-example", "backend": "auto", "image": "/var/lib/fluxvm/images/ubuntu.qcow2", "...": "..." }
@@ -920,7 +977,19 @@ GET    /v1/pools
 GET    /v1/pools/{name}
 DELETE /v1/pools/{name}
 POST   /v1/pools/{name}/claim
+POST   /v1/sandboxes
+GET    /v1/sandboxes
+POST   /v1/sandboxes/{id}/snapshot
+POST   /v1/sandboxes/{id}/fs/read
+POST   /v1/sandboxes/{id}/fs/write
+POST   /v1/sandboxes/{id}/process
+ANY    /v1/sandboxes/{id}/http/{port}/{*path}
+ANY    /sandbox/{id}/{*path}
+GET    /console
 ```
+
+Sandbox routes are the agent-sandbox surface on the FluxVm backend — see
+[Create a FluxVm agent sandbox](#create-a-fluxvm-agent-sandbox).
 
 `GET /v1/vms?name=<name>` exact-matches on `VmRecord.name` server-side. `POST /v1/vms/{uuid}/start`
 relaunches a `Stopped` VM from its existing disk/seed, skipping the image-clone/cloud-init/token-inject
@@ -1288,6 +1357,7 @@ fewest-VMs-wins (no CPU/memory-aware bin-packing, no per-VM node affinity/anti-a
   downloads/
   images/
   kernels/
+  templates/                 ([sandbox].templates_dir; OCI→template export)
   instances/
     <uuid>/
       root.qcow2 | root.raw
@@ -1295,9 +1365,10 @@ fewest-VMs-wins (no CPU/memory-aware bin-packing, no per-VM node affinity/anti-a
       user-data
       meta-data
       console.log
-      qmp.sock | ch-api.sock | firecracker.sock
-      vsock.sock              (Cloud Hypervisor/Firecracker only, when agent.enabled)
+      qmp.sock | ch-api.sock | firecracker.sock | fluxvm.sock
+      vsock.sock              (CH / Firecracker / FluxVm, when agent.enabled)
       firecracker.json
+      snapshot/               (FluxVm memory+disk snapshots)
       nbd.sock | nbd.pid      (storage=nbd only — see "Storage backends")
 ```
 
@@ -1315,7 +1386,7 @@ assigned the same vsock CID.
 
 1. **Firecracker jailer's own `--cgroup`/`--resource-limit` flags** — not wired up, but superseded in practice: every VM (all three backends, not just jailed Firecracker) already gets real cgroup v2 resource control (CPU/memory/IO/pids/cpuset, freeze/thaw, stats, PSI pressure) independent of the jailer — see "Resource control (cgroup v2)" above.
 2. **Network namespace policy** — one namespace per VM (veth + NAT + internal bridge) is already implemented and opt-in per VM (see "Network namespaces" above); still missing: nftables instead of one flat iptables MASQUERADE rule per VM, and real IPAM (subnets are derived deterministically from the VM id rather than tracked/reused, a documented theoretical-collision tradeoff).
-3. **Snapshots** — full VM state + disk snapshots per backend, for restoring a specific VM's exact prior state (as opposed to warm pools, already implemented, which speed up starting a *fresh* VM from a template — see "Warm VM pools" above). This is also the foundation for template memory restore (tens-of-ms agent sandboxes); see [docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md).
+3. **Snapshots on QEMU/CH** — FluxVm already has memory+disk snapshot/restore (see [Create a FluxVm agent sandbox](#create-a-fluxvm-agent-sandbox)); still missing equivalent full-state snapshots for the QEMU and Cloud Hypervisor backends.
 4. **Storage abstraction** — already implemented and fully verified: qcow2 CoW overlay and raw reflink (the always-on defaults, per VMM backend), plus opt-in LVM thin snapshots, NBD-exported disks, and Ceph RBD — all verified booting real guests on real hardware, Ceph RBD against a real Rook Ceph cluster; see "Storage backends" below. Not done: NVMe-local as a distinct backend (a local raw file/block device already gets NVMe's real performance with no extra abstraction needed — reflink/LVM already cover that case).
 5. **Image catalog** — already implemented: named/checksummed/Ed25519-signed entries, distro/version/arch metadata (see "Image catalog & signing" above). Not done: a cosign/Sigstore option specifically, for shops standardized on that instead of this project's own signing scheme.
 6. **Policy** — allowed networking modes are still unrestricted (max vCPU/RAM/disk/TTL and allowed backends/image directories are already implemented; see "Policy (admission limits)" above).
@@ -1325,7 +1396,7 @@ assigned the same vsock CID.
 10. **Distributed node-agent** — already implemented and verified across two real, physically separate hosts: `fluxvm-agent` (the per-*host* one, not `fluxvm-guest-agent`) central registry + node heartbeat client; see "Distributed node-agent" above. Not done: TLS/auth between nodes and central, persisted fleet state, and placement policies beyond fewest-VMs-wins.
 11. **Scheduler placement** — NUMA awareness, CPU pinning, hugepages and GPU/VFIO assignment.
 12. **Windows path** — QEMU/Cloud Hypervisor only; UEFI, virtio-win injection, sysprep and unattend support.
-13. **AI-agent sandbox parity** (optional product track; see [docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md)) — after full snapshots: agent-oriented REST + sandbox HTTP proxy, L7 egress allowlist with credential injection, AutoPause/wake-on-request, and multi-node shared control-plane state beyond the fleet agent.
+13. **AI-agent sandbox hardening** (see [docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md)) — pure in-tree KVM guests (no Firecracker child), fuller eBPF dataplane, published density/cold-start benchmarks; core sandbox REST/proxy/egress/AutoPause/Redis index already ship on the FluxVm track.
 
 "auto" backend selection is already implemented — see "Auto backend selection" above.
 
