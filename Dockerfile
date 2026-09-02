@@ -20,7 +20,7 @@
 # sibling at ../guestkit — matching every other path in this repo that
 # assumes that layout).
 
-FROM docker.io/library/rust:1.88-bookworm AS builder
+FROM docker.io/library/rust:1.89-bookworm AS builder
 
 # guestkit's default feature set pulls in libsystemd-sys (journal-native
 # logging), which needs libsystemd-dev's pkg-config file to build — this
@@ -35,7 +35,7 @@ COPY . ./ephemera
 COPY --from=guestkit . ./guestkit
 
 WORKDIR /build/ephemera
-RUN cargo build --release -p ephemera-cli -p ephemera-kube
+RUN cargo build --locked --release -p ephemera-cli -p ephemera-kube
 
 FROM docker.io/library/debian:bookworm-slim AS runtime
 
