@@ -4,7 +4,13 @@
 pub mod catalog;
 pub mod cloudinit;
 pub mod oci;
+pub mod qga;
 pub mod storage;
+pub mod windows;
+
+pub use windows::{
+    FirewallPort, RunOnceEntry, WindowsAgentSpec, WindowsCustomize, WindowsScript,
+};
 
 use anyhow::{Context, Result, bail};
 use fluxvm_core::{config::Config, model::BackendKind, process::run_checked};
@@ -47,6 +53,11 @@ pub struct BuildImageRequest {
     /// command exec, in the same session as every other customization step.
     #[serde(default)]
     pub enable_services: Vec<String>,
+    /// Offline Windows customization (registry plans + Zyvor/GuestKit agent).
+    /// Mutually exclusive with Linux-only fields (`packages`, `commands`,
+    /// `enable_services`, `ssh_key`, top-level `hostname`).
+    #[serde(default)]
+    pub windows: Option<WindowsCustomize>,
 }
 fn default_format() -> String {
     "qcow2".into()
@@ -128,19 +139,109 @@ pub async fn build_image(cfg: &Config, req: &BuildImageRequest) -> Result<BuildI
         .await?;
     }
 
-    let needs_customize = !req.copy_in.is_empty()
-        || !req.enable_services.is_empty()
-        || req.hostname.is_some()
-        || !req.packages.is_empty()
-        || !req.commands.is_empty()
-        || req.ssh_key.is_some();
-    if needs_customize {
-        customize_image(req.output.clone(), req.clone()).await?;
+    if let Some(win) = &req.windows {
+        validate_windows_vs_linux(req)?;
+        if windows_needs_customize(win) {
+            let image = req.output.clone();
+            let win = win.clone();
+            tokio::task::spawn_blocking(move || windows::customize_windows_blocking(&image, &win))
+                .await
+                .context("windows customize worker thread panicked")??;
+        }
+    } else {
+        let needs_customize = !req.copy_in.is_empty()
+            || !req.enable_services.is_empty()
+            || req.hostname.is_some()
+            || !req.packages.is_empty()
+            || !req.commands.is_empty()
+            || req.ssh_key.is_some();
+        if needs_customize {
+            customize_image(req.output.clone(), req.clone()).await?;
+        }
     }
     Ok(BuildImageResult {
         output: req.output.clone(),
         format: req.format.clone(),
     })
+}
+
+fn windows_needs_customize(win: &WindowsCustomize) -> bool {
+    win.hostname.is_some()
+        || win.enable_rdp
+        || win.enable_winrm
+        || !win.firewall_open.is_empty()
+        || !win.firewall_close.is_empty()
+        || !win.scripts.is_empty()
+        || !win.run_once.is_empty()
+        || win.password.is_some()
+        || win.agent.is_some()
+}
+
+fn validate_windows_vs_linux(req: &BuildImageRequest) -> Result<()> {
+    let mut bad = Vec::new();
+    if req.hostname.is_some() {
+        bad.push("hostname (use windows.hostname)");
+    }
+    if !req.packages.is_empty() {
+        bad.push("packages");
+    }
+    if !req.commands.is_empty() {
+        bad.push("commands");
+    }
+    if !req.enable_services.is_empty() {
+        bad.push("enable_services");
+    }
+    if req.ssh_key.is_some() {
+        bad.push("ssh_key");
+    }
+    if !req.copy_in.is_empty() {
+        bad.push("copy_in");
+    }
+    if !bad.is_empty() {
+        bail!(
+            "windows{{}} customize cannot be combined with Linux-only fields: {}",
+            bad.join(", ")
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod windows_validate_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn base_req() -> BuildImageRequest {
+        BuildImageRequest {
+            source: "/tmp/win.qcow2".into(),
+            output: PathBuf::from("/tmp/out.qcow2"),
+            format: "qcow2".into(),
+            size_gib: None,
+            sha256: None,
+            hostname: None,
+            packages: vec![],
+            commands: vec![],
+            ssh_key: None,
+            copy_in: vec![],
+            enable_services: vec![],
+            windows: Some(WindowsCustomize {
+                enable_rdp: true,
+                ..Default::default()
+            }),
+        }
+    }
+
+    #[test]
+    fn rejects_mixed_linux_fields() {
+        let mut req = base_req();
+        req.packages = vec!["curl".into()];
+        assert!(validate_windows_vs_linux(&req).is_err());
+    }
+
+    #[test]
+    fn accepts_windows_only() {
+        assert!(validate_windows_vs_linux(&base_req()).is_ok());
+    }
 }
 
 /// Applies every customization field on `req` (`copy_in`, `enable_services`,

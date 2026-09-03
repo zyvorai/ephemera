@@ -27,7 +27,7 @@ FROM docker.io/library/rust:1.89-bookworm AS builder
 # repo's own CI hits and works around the exact same gap (see
 # .github/workflows/ci.yml).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libsystemd-dev pkg-config \
+    libsystemd-dev libhivex-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build

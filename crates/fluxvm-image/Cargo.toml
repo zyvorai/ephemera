@@ -11,7 +11,7 @@ description = "Image build/clone and cloud-init seed generation for Zyvor FluxVM
 [dependencies]
 fluxvm-core = { path = "../fluxvm-core" }
 fluxvm-guest-protocol = { path = "../fluxvm-guest-protocol" }
-guestkit = { path = "../../../guestkit" }
+guestkit = { path = "../../../guestkit", features = ["registry-write", "agent"] }
 anyhow = "1"
 base64 = "0.22"
 ed25519-dalek = { version = "2", features = ["rand_core"] }

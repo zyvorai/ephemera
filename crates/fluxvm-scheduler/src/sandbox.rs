@@ -151,6 +151,7 @@ impl VmManager {
                 port: 17777,
                 token: None,
             }),
+            qga: None,
             storage: Default::default(),
             shared_folders: Vec::new(),
         };

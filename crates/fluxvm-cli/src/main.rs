@@ -61,6 +61,11 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         command: Vec<String>,
     },
+    /// QEMU guest-agent (virtio-serial) helpers — Zyvor/GuestKit Windows agent.
+    Qga {
+        #[command(subcommand)]
+        command: QgaCommand,
+    },
     Delete {
         id: Uuid,
     },
@@ -81,6 +86,50 @@ enum Command {
     Catalog {
         #[command(subcommand)]
         command: CatalogCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum QgaCommand {
+    /// guest-ping over the VM's QGA unix socket.
+    Ping { id: Uuid },
+    /// Run PowerShell (-Command) inside the guest via QGA guest-exec.
+    Powershell {
+        id: Uuid,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+        command: Vec<String>,
+    },
+    /// Raw guest-exec (path + args).
+    Exec {
+        id: Uuid,
+        #[arg(long)]
+        path: String,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Open an inbound Windows firewall port (live PowerShell).
+    FirewallOpen {
+        id: Uuid,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        port: u16,
+        #[arg(long, default_value = "tcp")]
+        protocol: String,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
+    },
+    /// Remove a Windows firewall rule by display name.
+    FirewallClose {
+        id: Uuid,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
     },
 }
 
@@ -199,6 +248,51 @@ async fn main() -> Result<()> {
             let response = m.exec(id, command.join(" "), timeout_seconds).await?;
             println!("{}", serde_json::to_string_pretty(&response)?);
         }
+        Command::Qga { command } => match command {
+            QgaCommand::Ping { id } => {
+                m.qga_ping(id).await?;
+                println!("{{\"ok\":true}}");
+            }
+            QgaCommand::Powershell {
+                id,
+                timeout_seconds,
+                command,
+            } => {
+                let result = m
+                    .qga_powershell(id, command.join(" "), timeout_seconds)
+                    .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            QgaCommand::Exec {
+                id,
+                path,
+                timeout_seconds,
+                args,
+            } => {
+                let result = m.qga_exec(id, path, args, timeout_seconds).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            QgaCommand::FirewallOpen {
+                id,
+                name,
+                port,
+                protocol,
+                timeout_seconds,
+            } => {
+                let result = m
+                    .qga_firewall_open(id, name, port, protocol, timeout_seconds)
+                    .await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            QgaCommand::FirewallClose {
+                id,
+                name,
+                timeout_seconds,
+            } => {
+                let result = m.qga_firewall_close(id, name, timeout_seconds).await?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+        },
         Command::Delete { id } => m.delete(id).await?,
         Command::BuildImage { spec } => {
             let req: BuildImageRequest = serde_json::from_slice(&std::fs::read(spec)?)?;

@@ -128,6 +128,10 @@ pub fn router(manager: Arc<VmManager>) -> Router {
         .route("/v1/vms/{id}/agent/put-file", post(agent_put_file))
         .route("/v1/vms/{id}/agent/get-file", post(agent_get_file))
         .route("/v1/vms/{id}/console", get(agent_console))
+        .route("/v1/vms/{id}/qga/ping", post(qga_ping))
+        .route("/v1/vms/{id}/qga/exec", post(qga_exec))
+        .route("/v1/vms/{id}/qga/firewall/open", post(qga_firewall_open))
+        .route("/v1/vms/{id}/qga/firewall/close", post(qga_firewall_close))
         .route("/v1/sandboxes", post(create_sandbox).get(list_sandboxes))
         .route("/v1/sandboxes/{id}/snapshot", post(snapshot_sandbox))
         .route("/v1/sandboxes/{id}/fs/read", post(sandbox_fs_read))
@@ -774,6 +778,97 @@ async fn agent_exec(
 }
 
 #[derive(Deserialize)]
+struct QgaExecRequest {
+    /// Guest executable path (e.g. `powershell.exe`). Ignored when `powershell` is set.
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    /// Convenience: run this string via `powershell.exe -Command`.
+    #[serde(default)]
+    powershell: Option<String>,
+    #[serde(default)]
+    timeout_seconds: Option<u64>,
+}
+
+async fn qga_ping(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_admin(role)?;
+    m.qga_ping(id).await?;
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn qga_exec(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<QgaExecRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_admin(role)?;
+    let result = if let Some(ps) = req.powershell {
+        m.qga_powershell(id, ps, req.timeout_seconds).await?
+    } else {
+        let path = req
+            .path
+            .ok_or_else(|| ApiError {
+                status: StatusCode::BAD_REQUEST,
+                message: "qga exec requires `path` or `powershell`".into(),
+            })?;
+        m.qga_exec(id, path, req.args, req.timeout_seconds).await?
+    };
+    Ok(Json(json!(result)))
+}
+
+#[derive(Deserialize)]
+struct QgaFirewallOpenRequest {
+    name: String,
+    port: u16,
+    #[serde(default = "default_fw_proto")]
+    protocol: String,
+    #[serde(default)]
+    timeout_seconds: Option<u64>,
+}
+fn default_fw_proto() -> String {
+    "tcp".into()
+}
+
+#[derive(Deserialize)]
+struct QgaFirewallCloseRequest {
+    name: String,
+    #[serde(default)]
+    timeout_seconds: Option<u64>,
+}
+
+async fn qga_firewall_open(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<QgaFirewallOpenRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_admin(role)?;
+    let result = m
+        .qga_firewall_open(id, req.name, req.port, req.protocol, req.timeout_seconds)
+        .await?;
+    Ok(Json(json!(result)))
+}
+
+async fn qga_firewall_close(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<QgaFirewallCloseRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_admin(role)?;
+    let result = m
+        .qga_firewall_close(id, req.name, req.timeout_seconds)
+        .await?;
+    Ok(Json(json!(result)))
+}
+
+#[derive(Deserialize)]
 struct PutFileRequest {
     path: String,
     content_base64: String,
@@ -1100,12 +1195,14 @@ mod tests {
                     port: 17777,
                     token: None,
                 }),
+                qga: None,
                 storage: Default::default(),
                 shared_folders: vec![],
             },
             guest_cid: None,
             jail_path: None,
             vsock_socket: None,
+            qga_socket: None,
             cgroup_path: None,
             netns: None,
             lvm_lv: None,

@@ -231,6 +231,22 @@ pub fn build_args(
         }
     }
 
+    if req.qga.as_ref().is_some_and(|q| q.enabled) {
+        let qga = ctx.workspace.join("qga.sock");
+        a.extend([
+            "-chardev".into(),
+            format!(
+                "socket,path={},server=on,wait=off,id=qga0",
+                path_arg(&qga)
+            ),
+            "-device".into(),
+            "virtio-serial-pci,id=virtio-serial0".into(),
+            "-device".into(),
+            "virtserialport,bus=virtio-serial0.0,chardev=qga0,name=org.qemu.guest_agent.0"
+                .into(),
+        ]);
+    }
+
     if let Some(kernel) = &req.kernel {
         a.extend(["-kernel".into(), path_arg(kernel)]);
         if let Some(initrd) = &req.initrd {
@@ -423,6 +439,7 @@ mod tests {
             ttl_seconds: None,
             extra_args: vec![],
             agent: None,
+            qga: None,
             storage: fluxvm_core::model::StorageBackend::Default,
             shared_folders: vec![],
         }
@@ -557,5 +574,17 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn qga_enabled_adds_virtio_serial_channel() {
+        let mut r = req(2048);
+        r.qga = Some(fluxvm_core::model::QgaSpec { enabled: true });
+        let args = build_args(&r, &ctx(), &[]).unwrap();
+        let joined = args.join(" ");
+        assert!(joined.contains("id=qga0"));
+        assert!(joined.contains("virtio-serial-pci"));
+        assert!(joined.contains("name=org.qemu.guest_agent.0"));
+        assert!(joined.contains("qga.sock"));
     }
 }

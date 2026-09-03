@@ -338,11 +338,13 @@ fi
 if [ "$PKG" = "apt-get" ]; then
     $SUDO apt-get install -y -qq \
         qemu-system-x86 qemu-utils cloud-image-utils \
-        iproute2 build-essential pkg-config curl git
+        iproute2 build-essential pkg-config curl git \
+        libsystemd-dev libhivex-dev
 else
     $SUDO "$PKG" install -y \
         qemu-kvm qemu-img cloud-utils \
-        iproute gcc make openssl-devel pkg-config curl git
+        iproute gcc make openssl-devel pkg-config curl git \
+        systemd-devel hivex-devel
 fi
 
 # guestkit (used by `fluxvm build-image`'s image customization) mounts

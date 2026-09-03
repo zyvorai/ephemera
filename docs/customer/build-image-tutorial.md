@@ -6,7 +6,10 @@ copy-in, and systemd service enablement — to produce a new, ready-to-boot
 image. It does this through [GuestKit](/guestkit) (`qemu-nbd` + `chroot`).
 Use **GuestKit only** — never libguestfs, `virt-customize`, or `guestfish`.
 There is **no VM boot**, so `build-image` doesn't need `/dev/kvm` — only root
-and the `nbd` kernel module.
+and the `nbd` kernel module. Windows disks use a `windows{}` block (offline
+RDP/WinRM/firewall/scripts and Zyvor GuestKit agent inject) instead of the
+Linux chroot path — see `examples/build-image-windows.json` and
+`fluxvm qga` for live PowerShell/firewall after boot with `qga.enabled`.
 
 This page walks through the three package-manager families `build-image`
 supports: Debian/Ubuntu (`apt`), RHEL-family (`dnf`/`tdnf`/`yum`), and Arch

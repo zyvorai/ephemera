@@ -238,7 +238,7 @@ project (path dep from `fluxvm-image`) for offline image customization — see
 - Console log path per VM.
 - Control sockets: QMP, Cloud Hypervisor API socket, Firecracker API socket.
 - Image download/cache + SHA-256 verification.
-- Image build customization via **guestkit only** (`qemu-nbd` + chroot — never libguestfs / virt-customize / guestfish): package install, hostname, arbitrary commands, SSH-key injection, `copy_in` for injecting files (e.g. the guest agent binary), and `enable_services` for enabling systemd units.
+- Image build customization via **guestkit only** (`qemu-nbd` + chroot — never libguestfs / virt-customize / guestfish): package install, hostname, arbitrary commands, SSH-key injection, `copy_in` for injecting files (e.g. the guest agent binary), and `enable_services` for enabling systemd units. Windows disks use a `windows{}` block (RDP/WinRM/firewall/scripts + Zyvor GuestKit agent inject) instead of the Linux chroot path.
 - systemd units and one-command host bootstrap (installs QEMU tooling, Cloud Hypervisor, and Firecracker).
 - SSH/rsync remote deploy script with full and quick profiles.
 - End-to-end networking smoke test (QEMU user-mode NAT, TAP+bridge+DHCP, and macvtap, all SSH-verified).
@@ -784,6 +784,30 @@ guest (`apt-get`/`tdnf`/`dnf`/`yum`/`pacman`, checked in that order) — see
 walkthrough per distro family (Debian/Ubuntu, RHEL-family, Arch Linux), including the two things
 Arch specifically needs (empty keyring, missing `/etc/mtab`) that `build-image` handles for you
 automatically.
+
+### Windows images (GuestKit offline + QGA live)
+
+Linux fields (`packages`, `commands`, `enable_services`, `ssh_key`, top-level `hostname`) cannot be
+combined with a `windows{}` block. Offline customize uses GuestKit registry plans +
+`inject_windows_agent` (needs host `libhivex` / `hivex-devel`, and the sibling guestkit checkout
+built with `registry-write` + `agent` — already enabled by `fluxvm-image`).
+
+```bash
+# Edit paths in examples/build-image-windows.json, then:
+sudo fluxvm --config /etc/fluxvm.toml build-image --spec examples/build-image-windows.json
+
+# Boot with QEMU virtio-serial QGA (Zyvor/GuestKit Windows agent):
+sudo fluxvm --config /etc/fluxvm.toml create --spec examples/windows-qga.json
+
+# Live PowerShell / firewall (after the guest agent is up):
+fluxvm qga ping <id>
+fluxvm qga powershell <id> -- 'Get-NetFirewallRule | Select-Object -First 5'
+fluxvm qga firewall-open <id> --name ZyvorApp --port 8080 --protocol tcp
+fluxvm qga firewall-close <id> --name ZyvorApp
+```
+
+REST mirrors the CLI: `POST /v1/vms/{id}/qga/ping|exec|firewall/open|firewall/close`.
+Gated offline smoke: `WINDOWS_IMAGE=… sudo -E ./scripts/test-windows-customize.sh`.
 
 ## Image catalog & signing
 
@@ -1403,7 +1427,7 @@ assigned the same vsock CID.
 9. **Kubernetes CRD/operator** — already implemented and verified against a real k3s cluster: `DisposableVm` CRD + node-local operator (`fluxvm-kube`); see "Kubernetes CRD/operator" above. Not done: packaging it as a real container image/daemonset manifest, a tap/macvtap networking mode in the CRD, and cross-node placement.
 10. **Distributed node-agent** — already implemented and verified across two real, physically separate hosts: `fluxvm-agent` (the per-*host* one, not `fluxvm-guest-agent`) central registry + node heartbeat client; see "Distributed node-agent" above. Not done: TLS/auth between nodes and central, persisted fleet state, and placement policies beyond fewest-VMs-wins.
 11. **Scheduler placement** — NUMA awareness, CPU pinning, hugepages and GPU/VFIO assignment.
-12. **Windows path** — QEMU/Cloud Hypervisor only; UEFI, virtio-win injection, sysprep and unattend support.
+12. **Windows path** — Offline `windows{}` build-image customize (RDP/WinRM/firewall/scripts/Zyvor GuestKit agent) and live QGA APIs on QEMU are implemented; still missing: full sysprep/unattend productization and Cloud Hypervisor Windows + QGA.
 13. **AI-agent sandbox hardening** (see [docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md)) — pure in-tree KVM guests (no Firecracker child), fuller eBPF dataplane, published density/cold-start benchmarks; core sandbox REST/proxy/egress/AutoPause/Redis index already ship on the FluxVm track.
 
 "auto" backend selection is already implemented — see "Auto backend selection" above.

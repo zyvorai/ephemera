@@ -38,10 +38,11 @@ info "Installing system packages (qemu, cloud-localds)..."
 . /etc/os-release 2>/dev/null || true
 if [[ "${ID:-}" == "debian" || "${ID:-}" == "ubuntu" || "${ID_LIKE:-}" == *"debian"* ]]; then
     $SUDO apt-get update -qq
-    $SUDO apt-get install -y -qq qemu-system-x86 qemu-utils cloud-image-utils iproute2 curl
+    # libhivex-dev: guestkit registry-write for Windows offline customize / agent-inject
+    $SUDO apt-get install -y -qq qemu-system-x86 qemu-utils cloud-image-utils iproute2 curl libhivex-dev
 elif command -v dnf >/dev/null || command -v yum >/dev/null; then
     PKG="$(command -v dnf >/dev/null && echo dnf || echo yum)"
-    $SUDO "$PKG" install -y qemu-kvm qemu-img cloud-utils iproute curl
+    $SUDO "$PKG" install -y qemu-kvm qemu-img cloud-utils iproute curl hivex-devel
 else
     warn "unrecognized package manager — install qemu-system-x86_64, qemu-img and cloud-localds manually"
 fi

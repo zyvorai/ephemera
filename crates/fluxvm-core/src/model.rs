@@ -148,6 +148,14 @@ impl Default for AgentSpec {
     }
 }
 
+/// QEMU guest-agent (virtio-serial `org.qemu.guest_agent.0`) channel.
+/// Used for Zyvor/GuestKit Windows agent live control (`fluxvm qga …`).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct QgaSpec {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CloudInitSpec {
     #[serde(default)]
@@ -254,6 +262,9 @@ pub struct CreateVmRequest {
     pub extra_args: Vec<String>,
     #[serde(default)]
     pub agent: Option<AgentSpec>,
+    /// Enable QEMU guest-agent virtio-serial channel (QEMU backend only).
+    #[serde(default)]
+    pub qga: Option<QgaSpec>,
     #[serde(default)]
     pub storage: StorageBackend,
     #[serde(default)]
@@ -303,6 +314,10 @@ pub struct VmRecord {
     /// Firecracker only) — see `backend::LaunchResult::vsock_socket`.
     #[serde(default)]
     pub vsock_socket: Option<PathBuf>,
+    /// QEMU guest-agent unix socket (`org.qemu.guest_agent.0`) when
+    /// `request.qga.enabled` — see `VmRecord::qga_socket`.
+    #[serde(default)]
+    pub qga_socket: Option<PathBuf>,
     /// cgroup v2 path (`fluxvm.slice/{id}.scope`) the launched VMM
     /// process was migrated into, once `VmManager` has done so —
     /// `None` until the first successful launch completes cgroup setup.

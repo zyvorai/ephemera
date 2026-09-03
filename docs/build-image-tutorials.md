@@ -4,9 +4,11 @@
 hostname, package installs, arbitrary commands, SSH-key injection, file
 copy-in, and systemd service enablement — to produce a new, ready-to-boot
 image. Everything runs through [`guestkit`](https://github.com/zyvorai/guestkit)
-(`qemu-nbd` mount + `chroot`). Use **guestkit only** — never libguestfs,
-`virt-customize`, or `guestfish`. There is **no VM boot** either, so
-`build-image` doesn't need `/dev/kvm`, only root and the `nbd` kernel module.
+(`qemu-nbd` mount + `chroot` for Linux; registry plans + agent-inject for
+Windows). Use **guestkit only** — never libguestfs, `virt-customize`, or
+`guestfish`. There is **no VM boot** either, so `build-image` doesn't need
+`/dev/kvm`, only root and the `nbd` kernel module (plus `libhivex` for
+Windows hive writes).
 
 This doc is a set of copy-pasteable, real-hardware-verified tutorials for the
 three package-manager families `build-image` supports: Debian/Ubuntu
@@ -14,7 +16,8 @@ three package-manager families `build-image` supports: Debian/Ubuntu
 example below was actually run against a real cloud image of that distro —
 see `scripts/test-image-customize.sh` for the automated version of the same
 checks (and the CI job that runs it on every push, across all three
-families).
+families). Windows offline customize is covered in
+[Windows images](#windows-images) below and `examples/build-image-windows.json`.
 
 ## How it works, briefly
 
@@ -208,3 +211,26 @@ sudo TEST_SERVICE=crond ./scripts/test-image-customize.sh --image /path/to/rocky
   exact unit name for your distro/version.
 - **`packages` install of an Arch guest is slow the first time** — that's
   the one-time `pacman-key --init` GPG master-key generation, not a hang.
+
+## Windows images
+
+Use a `windows{}` block instead of Linux fields. Host needs `libhivex-dev` /
+`hivex-devel` (see `scripts/bootstrap-host.sh`).
+
+```bash
+sudo fluxvm build-image --spec examples/build-image-windows.json
+```
+
+| Field | What it does |
+|---|---|
+| `hostname` | Offline Windows hostname plan |
+| `enable_rdp` / `enable_winrm` | Stock RDP (:3389) / WinRM (:5985) + firewall rules |
+| `firewall_open` / `firewall_close` | Custom inbound FirewallRules blobs |
+| `scripts` / `run_once` | Write files + stage RunOnce for first boot |
+| `user` / `password` | Stage RunOnce `net user` |
+| `agent` | Offline Zyvor/GuestKit `guestkitd.exe` inject (+ optional virtio-serial driver) |
+
+Do not mix `windows{}` with `packages` / `commands` / `enable_services` / `ssh_key` /
+top-level `hostname`. After boot with `qga.enabled` (QEMU only), use
+`fluxvm qga …` or `POST /v1/vms/{id}/qga/…` for live PowerShell and firewall
+changes. Gated smoke: `WINDOWS_IMAGE=… sudo -E ./scripts/test-windows-customize.sh`.

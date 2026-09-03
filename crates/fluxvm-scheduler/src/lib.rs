@@ -479,6 +479,7 @@ impl VmManager {
             guest_cid: None,
             jail_path: None,
             vsock_socket: None,
+            qga_socket: None,
             cgroup_path: None,
             netns: None,
             lvm_lv: None,
@@ -496,6 +497,10 @@ impl VmManager {
             .insert_with_cid(placeholder, needs_cid, FIRST_GUEST_CID)
             .await?;
         let guest_cid = record.guest_cid;
+
+        if req.qga.as_ref().is_some_and(|q| q.enabled) && req.backend != BackendKind::Qemu {
+            anyhow::bail!("qga.enabled requires backend qemu (virtio-serial guest-agent channel)");
+        }
 
         let result: Result<()> = async {
             let agent_token = req.agent.as_ref().and_then(|a| a.token.as_deref());
@@ -567,6 +572,9 @@ impl VmManager {
             record.jail_path = launch.jail_path;
             record.vsock_socket = launch.vsock_socket;
             record.virtiofsd_pids = launch.virtiofsd_pids;
+            if req.qga.as_ref().is_some_and(|q| q.enabled) {
+                record.qga_socket = Some(workspace.join("qga.sock"));
+            }
             Self::attach_cgroup(id, launch.pid, &mut record);
             record.status = VmStatus::Running;
             if req.backend == BackendKind::FluxVm {
@@ -735,6 +743,9 @@ impl VmManager {
             vm.jail_path = launch.jail_path;
             vm.vsock_socket = launch.vsock_socket;
             vm.virtiofsd_pids = launch.virtiofsd_pids;
+            if vm.request.qga.as_ref().is_some_and(|q| q.enabled) {
+                vm.qga_socket = Some(vm.workspace.join("qga.sock"));
+            }
             Self::attach_cgroup(id, launch.pid, &mut vm);
             vm.status = VmStatus::Running;
             vm.error = None;
@@ -843,6 +854,90 @@ impl VmManager {
             wait,
         )
         .await
+    }
+
+    fn qga_socket_for(vm: &VmRecord) -> Result<std::path::PathBuf> {
+        vm.qga_socket
+            .clone()
+            .or_else(|| {
+                vm.request
+                    .qga
+                    .as_ref()
+                    .filter(|q| q.enabled)
+                    .map(|_| vm.workspace.join("qga.sock"))
+            })
+            .context("QGA not enabled for this VM (set qga.enabled in the create spec)")
+    }
+
+    pub async fn qga_ping(&self, id: Uuid) -> Result<()> {
+        let vm = self.get(id).await?;
+        let sock = Self::qga_socket_for(&vm)?;
+        tokio::task::spawn_blocking(move || fluxvm_image::qga::ping(&sock))
+            .await
+            .context("qga ping worker panicked")?
+    }
+
+    pub async fn qga_exec(
+        &self,
+        id: Uuid,
+        path: String,
+        args: Vec<String>,
+        timeout_seconds: Option<u64>,
+    ) -> Result<fluxvm_image::qga::QgaExecResult> {
+        let vm = self.get(id).await?;
+        let sock = Self::qga_socket_for(&vm)?;
+        let timeout = std::time::Duration::from_secs(timeout_seconds.unwrap_or(60));
+        tokio::task::spawn_blocking(move || fluxvm_image::qga::exec(&sock, &path, &args, timeout))
+            .await
+            .context("qga exec worker panicked")?
+    }
+
+    pub async fn qga_powershell(
+        &self,
+        id: Uuid,
+        command: String,
+        timeout_seconds: Option<u64>,
+    ) -> Result<fluxvm_image::qga::QgaExecResult> {
+        let vm = self.get(id).await?;
+        let sock = Self::qga_socket_for(&vm)?;
+        let timeout = std::time::Duration::from_secs(timeout_seconds.unwrap_or(60));
+        tokio::task::spawn_blocking(move || fluxvm_image::qga::powershell(&sock, &command, timeout))
+            .await
+            .context("qga powershell worker panicked")?
+    }
+
+    pub async fn qga_firewall_open(
+        &self,
+        id: Uuid,
+        name: String,
+        port: u16,
+        protocol: String,
+        timeout_seconds: Option<u64>,
+    ) -> Result<fluxvm_image::qga::QgaExecResult> {
+        let vm = self.get(id).await?;
+        let sock = Self::qga_socket_for(&vm)?;
+        let timeout = std::time::Duration::from_secs(timeout_seconds.unwrap_or(60));
+        tokio::task::spawn_blocking(move || {
+            fluxvm_image::qga::firewall_open(&sock, &name, port, &protocol, timeout)
+        })
+        .await
+        .context("qga firewall open worker panicked")?
+    }
+
+    pub async fn qga_firewall_close(
+        &self,
+        id: Uuid,
+        name: String,
+        timeout_seconds: Option<u64>,
+    ) -> Result<fluxvm_image::qga::QgaExecResult> {
+        let vm = self.get(id).await?;
+        let sock = Self::qga_socket_for(&vm)?;
+        let timeout = std::time::Duration::from_secs(timeout_seconds.unwrap_or(60));
+        tokio::task::spawn_blocking(move || {
+            fluxvm_image::qga::firewall_close(&sock, &name, timeout)
+        })
+        .await
+        .context("qga firewall close worker panicked")?
     }
 
     /// Write a file into the guest over the vsock agent — see
@@ -1281,6 +1376,7 @@ mod tests {
             ttl_seconds: None,
             extra_args: vec![],
             agent: None,
+            qga: None,
             storage: StorageBackend::Default,
             shared_folders: vec![],
         }
