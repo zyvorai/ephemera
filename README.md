@@ -224,6 +224,13 @@ project (path dep from `fluxvm-image`) for offline image customization — see
 - TAP interface creation and optional Linux bridge attachment.
 - macvtap networking (QEMU and Cloud Hypervisor) — a VM's own MAC directly on a parent link, no bridge.
 - QEMU user-mode networking + host port forwarding.
+- Static-IP network-namespace mode — the guest gets a real, deterministically-reserved DHCP-leased IP, not just host↔namespace NAT.
+- VNC for every QEMU-backed VM, over a unix socket — no port allocation.
+- Interactive console/shell: `GET /v1/vms/{id}/console` (WebSocket) and a guest-agent `OpenShell` vsock op for a real PTY.
+- File transfer over the guest agent: `PutFile`/`GetFile` vsock ops (`POST /v1/vms/{id}/agent/{put,get}-file`).
+- virtiofs shared folders (QEMU backend).
+- True suspend-to-disk resume (`-loadvm`) with a virtio-scsi controller.
+- `GET /v1/vms/{id}/cpuset`.
 - VM state persisted to JSON.
 - REST API.
 - CLI.

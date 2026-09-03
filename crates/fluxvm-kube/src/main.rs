@@ -24,9 +24,9 @@ async fn main() -> Result<()> {
     let base_url = std::env::var("FLUXVM_URL").unwrap_or_else(|_| "http://127.0.0.1:7788".into());
     let token = std::env::var("FLUXVM_TOKEN").ok();
 
-    let client = kube::Client::try_default()
-        .await
-        .context("connecting to Kubernetes (reads KUBECONFIG, or in-cluster config when run as a pod)")?;
+    let client = kube::Client::try_default().await.context(
+        "connecting to Kubernetes (reads KUBECONFIG, or in-cluster config when run as a pod)",
+    )?;
     let fluxvm = FluxVMClient::new(base_url, token);
 
     controller::run(client, fluxvm, node_name).await;

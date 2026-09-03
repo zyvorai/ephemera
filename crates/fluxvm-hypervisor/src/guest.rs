@@ -35,12 +35,18 @@ pub async fn start(cfg: &BootConfig, workspace: &Path) -> Result<GuestHandle> {
     let api_sock = workspace.join("firecracker.sock");
     let _ = fs::remove_file(&api_sock);
     let cfg_path = workspace.join("firecracker.json");
-    fs::write(&cfg_path, serde_json::to_vec_pretty(&firecracker_config(cfg)?)?)?;
+    fs::write(
+        &cfg_path,
+        serde_json::to_vec_pretty(&firecracker_config(cfg)?)?,
+    )?;
 
-    let binary = std::env::var("FLUXVM_FIRECRACKER_BINARY")
-        .unwrap_or_else(|_| "firecracker".into());
+    let binary =
+        std::env::var("FLUXVM_FIRECRACKER_BINARY").unwrap_or_else(|_| "firecracker".into());
     let log = workspace.join("firecracker.log");
-    let stdout = fs::OpenOptions::new().create(true).append(true).open(&log)?;
+    let stdout = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)?;
     let stderr = stdout.try_clone()?;
 
     let mut child = Command::new(&binary)
@@ -75,7 +81,10 @@ pub async fn start(cfg: &BootConfig, workspace: &Path) -> Result<GuestHandle> {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    info!(pid = child.id().unwrap_or(0), "Firecracker guest started under fluxvm-hypervisor");
+    info!(
+        pid = child.id().unwrap_or(0),
+        "Firecracker guest started under fluxvm-hypervisor"
+    );
     Ok(GuestHandle {
         child,
         api_sock,
@@ -119,7 +128,10 @@ fn firecracker_config(cfg: &BootConfig) -> Result<serde_json::Value> {
     });
 
     if let Some(tap) = &cfg.tap {
-        let guest_mac = cfg.mac.clone().unwrap_or_else(|| "06:00:AC:10:00:02".into());
+        let guest_mac = cfg
+            .mac
+            .clone()
+            .unwrap_or_else(|| "06:00:AC:10:00:02".into());
         root.as_object_mut().unwrap().insert(
             "network-interfaces".into(),
             json!([{
@@ -152,7 +164,13 @@ pub async fn resume(api: &Path) -> Result<()> {
 }
 
 pub async fn shutdown(api: &Path) -> Result<()> {
-    fc_request(api, "PUT", "/actions", Some(&json!({"action_type": "SendCtrlAltDel"}))).await
+    fc_request(
+        api,
+        "PUT",
+        "/actions",
+        Some(&json!({"action_type": "SendCtrlAltDel"})),
+    )
+    .await
 }
 
 /// Create a full Firecracker snapshot (VM must already be Paused).
@@ -181,9 +199,13 @@ pub async fn start_from_snapshot(
     let api_sock = workspace.join("firecracker.sock");
     let _ = fs::remove_file(&api_sock);
 
-    let binary = std::env::var("FLUXVM_FIRECRACKER_BINARY").unwrap_or_else(|_| "firecracker".into());
+    let binary =
+        std::env::var("FLUXVM_FIRECRACKER_BINARY").unwrap_or_else(|_| "firecracker".into());
     let log = workspace.join("firecracker.log");
-    let stdout = fs::OpenOptions::new().create(true).append(true).open(&log)?;
+    let stdout = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)?;
     let stderr = stdout.try_clone()?;
 
     let mut child = Command::new(&binary)
@@ -217,10 +239,9 @@ pub async fn start_from_snapshot(
         "resume_vm": true
     });
     if let Some(uds) = vsock_uds {
-        body.as_object_mut().unwrap().insert(
-            "vsock_override".into(),
-            json!(uds.display().to_string()),
-        );
+        body.as_object_mut()
+            .unwrap()
+            .insert("vsock_override".into(), json!(uds.display().to_string()));
     }
 
     if let Err(e) = fc_request(&api_sock, "PUT", "/snapshot/load", Some(&body)).await {
@@ -228,7 +249,10 @@ pub async fn start_from_snapshot(
         return Err(e).context("Firecracker snapshot load");
     }
 
-    info!(pid = child.id().unwrap_or(0), "Firecracker restored from memory snapshot");
+    info!(
+        pid = child.id().unwrap_or(0),
+        "Firecracker restored from memory snapshot"
+    );
     Ok(GuestHandle {
         child,
         api_sock,
@@ -236,17 +260,30 @@ pub async fn start_from_snapshot(
     })
 }
 
-async fn fc_request(socket: &Path, method: &str, path: &str, body: Option<&serde_json::Value>) -> Result<()> {
+async fn fc_request(
+    socket: &Path,
+    method: &str,
+    path: &str,
+    body: Option<&serde_json::Value>,
+) -> Result<()> {
     tokio::time::timeout(FC_API_TIMEOUT, fc_request_inner(socket, method, path, body))
         .await
         .with_context(|| format!("Firecracker {method} {path} timed out"))?
 }
 
-async fn fc_request_inner(socket: &Path, method: &str, path: &str, body: Option<&serde_json::Value>) -> Result<()> {
+async fn fc_request_inner(
+    socket: &Path,
+    method: &str,
+    path: &str,
+    body: Option<&serde_json::Value>,
+) -> Result<()> {
     let mut stream = UnixStream::connect(socket)
         .await
         .with_context(|| format!("connecting to {}", socket.display()))?;
-    let body_bytes = body.map(serde_json::to_vec).transpose()?.unwrap_or_default();
+    let body_bytes = body
+        .map(serde_json::to_vec)
+        .transpose()?
+        .unwrap_or_default();
     let mut req = format!(
         "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: {}\r\n",
         body_bytes.len()
@@ -282,7 +319,10 @@ async fn fc_request_inner(socket: &Path, method: &str, path: &str, body: Option<
         .parse()?;
     let content_length: usize = head
         .lines()
-        .find_map(|l| l.split_once(':').filter(|(k, _)| k.eq_ignore_ascii_case("content-length")))
+        .find_map(|l| {
+            l.split_once(':')
+                .filter(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        })
         .and_then(|(_, v)| v.trim().parse().ok())
         .unwrap_or(0);
     while body.len() < content_length {

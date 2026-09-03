@@ -4,7 +4,10 @@
 use crate::model::BackendKind;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -124,7 +127,10 @@ pub struct StorageConfig {
 
 impl Default for StorageConfig {
     fn default() -> Self {
-        Self { ceph_user: "admin".into(), ceph_conf: None }
+        Self {
+            ceph_user: "admin".into(),
+            ceph_conf: None,
+        }
     }
 }
 
@@ -252,7 +258,9 @@ pub struct Policy {
 
 impl Config {
     pub fn load(path: Option<&Path>) -> Result<Self> {
-        let Some(path) = path else { return Ok(Self::default()); };
+        let Some(path) = path else {
+            return Ok(Self::default());
+        };
         let raw = fs::read_to_string(path)
             .with_context(|| format!("reading config {}", path.display()))?;
         toml::from_str(&raw).with_context(|| format!("parsing config {}", path.display()))

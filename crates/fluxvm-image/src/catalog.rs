@@ -13,8 +13,8 @@
 //! feature list explicitly allowed for.
 
 use crate::{fetch_if_needed, verify_sha256};
-use anyhow::{bail, Context, Result};
-use base64::{engine::general_purpose::STANDARD as B64, Engine};
+use anyhow::{Context, Result, bail};
+use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use fluxvm_core::config::Config;
 use rand::rngs::OsRng;
@@ -56,17 +56,23 @@ pub struct CatalogEntry {
     #[serde(default)]
     pub read_only: bool,
 }
-fn default_format() -> String { "qcow2".into() }
+fn default_format() -> String {
+    "qcow2".into()
+}
 
 /// The exact bytes a signature is computed over — every field that
 /// identifies *what* is being vouched for, so a signature can't be replayed
 /// onto an entry with the same name but a different source/checksum.
 fn canonical_payload(entry: &CatalogEntry) -> String {
-    format!("{}\n{}\n{}\n{}", entry.name, entry.source, entry.sha256, entry.format)
+    format!(
+        "{}\n{}\n{}\n{}",
+        entry.name, entry.source, entry.sha256, entry.format
+    )
 }
 
 fn load_catalog(path: &Path) -> Result<Vec<CatalogEntry>> {
-    let raw = fs::read_to_string(path).with_context(|| format!("reading catalog {}", path.display()))?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("reading catalog {}", path.display()))?;
     serde_json::from_str(&raw).with_context(|| format!("parsing catalog {}", path.display()))
 }
 
@@ -93,16 +99,37 @@ fn catalog_path(cfg: &Config) -> Result<&Path> {
 ///
 /// Replaces machinectl's `pull-raw`/`import-raw` (a URL and a local path
 /// are handled identically here, same as everywhere else `source` is used).
-pub async fn add_entry(cfg: &Config, name: String, source: String, format: String) -> Result<CatalogEntry> {
+pub async fn add_entry(
+    cfg: &Config,
+    name: String,
+    source: String,
+    format: String,
+) -> Result<CatalogEntry> {
     let path = catalog_path(cfg)?;
-    let mut entries = if path.exists() { load_catalog(path)? } else { Vec::new() };
+    let mut entries = if path.exists() {
+        load_catalog(path)?
+    } else {
+        Vec::new()
+    };
     if entries.iter().any(|e| e.name == name) {
         bail!("catalog entry '{name}' already exists");
     }
-    let local = fetch_if_needed(cfg, &source).await.with_context(|| format!("fetching '{source}'"))?;
+    let local = fetch_if_needed(cfg, &source)
+        .await
+        .with_context(|| format!("fetching '{source}'"))?;
     let bytes = fs::read(&local).with_context(|| format!("reading {}", local.display()))?;
     let sha256 = format!("{:x}", Sha256::digest(&bytes));
-    let entry = CatalogEntry { name, source, sha256, format, distro: None, version: None, arch: None, signature: None, read_only: false };
+    let entry = CatalogEntry {
+        name,
+        source,
+        sha256,
+        format,
+        distro: None,
+        version: None,
+        arch: None,
+        signature: None,
+        read_only: false,
+    };
     entries.push(entry.clone());
     save_catalog(path, &entries)?;
     Ok(entry)
@@ -191,13 +218,16 @@ pub fn clean_downloads(cfg: &Config) -> Result<Vec<String>> {
         _ => std::collections::HashSet::new(),
     };
     let mut removed = Vec::new();
-    for entry in fs::read_dir(&downloads).with_context(|| format!("reading {}", downloads.display()))? {
+    for entry in
+        fs::read_dir(&downloads).with_context(|| format!("reading {}", downloads.display()))?
+    {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
         if referenced.contains(&name) {
             continue;
         }
-        fs::remove_file(entry.path()).with_context(|| format!("removing {}", entry.path().display()))?;
+        fs::remove_file(entry.path())
+            .with_context(|| format!("removing {}", entry.path().display()))?;
         removed.push(name);
     }
     Ok(removed)
@@ -216,7 +246,11 @@ pub fn clone_entry(cfg: &Config, name: &str, target_name: &str) -> Result<Catalo
         .find(|e| e.name == name)
         .with_context(|| format!("catalog entry '{name}' not found"))?
         .clone();
-    let cloned = CatalogEntry { name: target_name.to_string(), signature: None, ..source_entry };
+    let cloned = CatalogEntry {
+        name: target_name.to_string(),
+        signature: None,
+        ..source_entry
+    };
     entries.push(cloned.clone());
     save_catalog(path, &entries)?;
     Ok(cloned)
@@ -227,32 +261,54 @@ pub fn clone_entry(cfg: &Config, name: &str, target_name: &str) -> Result<Catalo
 pub async fn export_entry(cfg: &Config, name: &str, dest: &Path) -> Result<()> {
     let path = catalog_path(cfg)?;
     let entries = load_catalog(path)?;
-    let entry = entries.iter().find(|e| e.name == name).with_context(|| format!("catalog entry '{name}' not found"))?;
+    let entry = entries
+        .iter()
+        .find(|e| e.name == name)
+        .with_context(|| format!("catalog entry '{name}' not found"))?;
     let local = fetch_if_needed(cfg, &entry.source).await?;
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
-    fs::copy(&local, dest).with_context(|| format!("copying {} to {}", local.display(), dest.display()))?;
+    fs::copy(&local, dest)
+        .with_context(|| format!("copying {} to {}", local.display(), dest.display()))?;
     Ok(())
 }
 
 fn parse_public_key(b64: &str) -> Result<VerifyingKey> {
-    let bytes = B64.decode(b64).context("trusted_signers entry is not valid base64")?;
-    let arr: [u8; 32] = bytes.try_into().map_err(|v: Vec<u8>| anyhow::anyhow!("public key must be 32 bytes, got {}", v.len()))?;
+    let bytes = B64
+        .decode(b64)
+        .context("trusted_signers entry is not valid base64")?;
+    let arr: [u8; 32] = bytes
+        .try_into()
+        .map_err(|v: Vec<u8>| anyhow::anyhow!("public key must be 32 bytes, got {}", v.len()))?;
     VerifyingKey::from_bytes(&arr).context("invalid Ed25519 public key")
 }
 
 fn verify_signature(entry: &CatalogEntry, trusted: &[VerifyingKey]) -> Result<()> {
-    let sig_b64 = entry.signature.as_deref()
-        .with_context(|| format!("catalog entry '{}' has no signature, but trusted_signers is configured", entry.name))?;
-    let sig_bytes = B64.decode(sig_b64).context("signature is not valid base64")?;
-    let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|v: Vec<u8>| anyhow::anyhow!("signature must be 64 bytes, got {}", v.len()))?;
+    let sig_b64 = entry.signature.as_deref().with_context(|| {
+        format!(
+            "catalog entry '{}' has no signature, but trusted_signers is configured",
+            entry.name
+        )
+    })?;
+    let sig_bytes = B64
+        .decode(sig_b64)
+        .context("signature is not valid base64")?;
+    let sig_arr: [u8; 64] = sig_bytes
+        .try_into()
+        .map_err(|v: Vec<u8>| anyhow::anyhow!("signature must be 64 bytes, got {}", v.len()))?;
     let sig = Signature::from_bytes(&sig_arr);
     let payload = canonical_payload(entry);
-    if trusted.iter().any(|key| key.verify(payload.as_bytes(), &sig).is_ok()) {
+    if trusted
+        .iter()
+        .any(|key| key.verify(payload.as_bytes(), &sig).is_ok())
+    {
         Ok(())
     } else {
-        bail!("catalog entry '{}' signature does not match any configured trusted_signers", entry.name);
+        bail!(
+            "catalog entry '{}' signature does not match any configured trusted_signers",
+            entry.name
+        );
     }
 }
 
@@ -269,8 +325,12 @@ fn verify_signature(entry: &CatalogEntry, trusted: &[VerifyingKey]) -> Result<()
 ///   path is re-hashed here, so a file that changed after the catalog was
 ///   authored is caught rather than silently trusted.
 pub async fn resolve(cfg: &Config, image_ref: &Path) -> Result<PathBuf> {
-    let Some(catalog_path) = &cfg.catalog.path else { return Ok(image_ref.to_path_buf()) };
-    let Some(ref_str) = image_ref.to_str() else { return Ok(image_ref.to_path_buf()) };
+    let Some(catalog_path) = &cfg.catalog.path else {
+        return Ok(image_ref.to_path_buf());
+    };
+    let Some(ref_str) = image_ref.to_str() else {
+        return Ok(image_ref.to_path_buf());
+    };
     // A configured-but-not-yet-created catalog matches nothing — every
     // image_ref passes through unchanged, same as catalog.path being unset.
     if !catalog_path.exists() {
@@ -283,15 +343,25 @@ pub async fn resolve(cfg: &Config, image_ref: &Path) -> Result<PathBuf> {
     };
 
     if !cfg.catalog.trusted_signers.is_empty() {
-        let keys: Vec<VerifyingKey> = cfg.catalog.trusted_signers.iter().map(|s| parse_public_key(s)).collect::<Result<_>>()
+        let keys: Vec<VerifyingKey> = cfg
+            .catalog
+            .trusted_signers
+            .iter()
+            .map(|s| parse_public_key(s))
+            .collect::<Result<_>>()
             .context("parsing config.catalog.trusted_signers")?;
         verify_signature(entry, &keys)?;
     }
 
-    let local = fetch_if_needed(cfg, &entry.source).await
+    let local = fetch_if_needed(cfg, &entry.source)
+        .await
         .with_context(|| format!("fetching catalog entry '{}'", entry.name))?;
-    verify_sha256(&local, &entry.sha256)
-        .with_context(|| format!("catalog entry '{}' failed checksum verification", entry.name))?;
+    verify_sha256(&local, &entry.sha256).with_context(|| {
+        format!(
+            "catalog entry '{}' failed checksum verification",
+            entry.name
+        )
+    })?;
     Ok(local)
 }
 
@@ -310,19 +380,36 @@ pub struct CatalogListEntry {
 /// lets an operator audit the catalog without re-deriving verification
 /// logic client-side.
 pub fn list_with_verification(cfg: &Config) -> Result<Vec<CatalogListEntry>> {
-    let Some(catalog_path) = &cfg.catalog.path else { return Ok(Vec::new()) };
+    let Some(catalog_path) = &cfg.catalog.path else {
+        return Ok(Vec::new());
+    };
     // A configured-but-not-yet-created catalog is an empty catalog, not an
     // error — nothing has called add_entry yet.
     if !catalog_path.exists() {
         return Ok(Vec::new());
     }
     let catalog = load_catalog(catalog_path)?;
-    let keys: Vec<VerifyingKey> = cfg.catalog.trusted_signers.iter().map(|s| parse_public_key(s)).collect::<Result<_>>()
+    let keys: Vec<VerifyingKey> = cfg
+        .catalog
+        .trusted_signers
+        .iter()
+        .map(|s| parse_public_key(s))
+        .collect::<Result<_>>()
         .context("parsing config.catalog.trusted_signers")?;
-    Ok(catalog.into_iter().map(|entry| {
-        let signature_valid = if keys.is_empty() { None } else { Some(verify_signature(&entry, &keys).is_ok()) };
-        CatalogListEntry { entry, signature_valid }
-    }).collect())
+    Ok(catalog
+        .into_iter()
+        .map(|entry| {
+            let signature_valid = if keys.is_empty() {
+                None
+            } else {
+                Some(verify_signature(&entry, &keys).is_ok())
+            };
+            CatalogListEntry {
+                entry,
+                signature_valid,
+            }
+        })
+        .collect())
 }
 
 /// `fluxvm catalog keygen`: a fresh Ed25519 keypair, both halves
@@ -349,11 +436,25 @@ pub fn sign_entry(
     version: Option<String>,
     arch: Option<String>,
 ) -> Result<CatalogEntry> {
-    let key_bytes = B64.decode(private_key_b64).context("private key is not valid base64")?;
-    let key_arr: [u8; 32] = key_bytes.try_into().map_err(|v: Vec<u8>| anyhow::anyhow!("private key must be 32 bytes, got {}", v.len()))?;
+    let key_bytes = B64
+        .decode(private_key_b64)
+        .context("private key is not valid base64")?;
+    let key_arr: [u8; 32] = key_bytes
+        .try_into()
+        .map_err(|v: Vec<u8>| anyhow::anyhow!("private key must be 32 bytes, got {}", v.len()))?;
     let signing_key = SigningKey::from_bytes(&key_arr);
 
-    let mut entry = CatalogEntry { name, source, sha256, format, distro, version, arch, signature: None, read_only: false };
+    let mut entry = CatalogEntry {
+        name,
+        source,
+        sha256,
+        format,
+        distro,
+        version,
+        arch,
+        signature: None,
+        read_only: false,
+    };
     let signature = signing_key.sign(canonical_payload(&entry).as_bytes());
     entry.signature = Some(B64.encode(signature.to_bytes()));
     Ok(entry)
@@ -366,7 +467,13 @@ mod tests {
     use sha2::Digest;
 
     fn cfg_with_catalog(path: &Path, trusted_signers: Vec<String>) -> Config {
-        Config { catalog: CatalogConfig { path: Some(path.to_path_buf()), trusted_signers }, ..Config::default() }
+        Config {
+            catalog: CatalogConfig {
+                path: Some(path.to_path_buf()),
+                trusted_signers,
+            },
+            ..Config::default()
+        }
     }
 
     fn write_catalog(dir: &Path, entries: &[CatalogEntry]) -> PathBuf {
@@ -378,7 +485,9 @@ mod tests {
     #[tokio::test]
     async fn unconfigured_catalog_passes_the_reference_through_unchanged() {
         let cfg = Config::default(); // catalog.path is None
-        let resolved = resolve(&cfg, Path::new("/some/literal/path.qcow2")).await.unwrap();
+        let resolved = resolve(&cfg, Path::new("/some/literal/path.qcow2"))
+            .await
+            .unwrap();
         assert_eq!(resolved, PathBuf::from("/some/literal/path.qcow2"));
     }
 
@@ -387,7 +496,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let catalog_path = write_catalog(dir.path(), &[]);
         let cfg = cfg_with_catalog(&catalog_path, vec![]);
-        let resolved = resolve(&cfg, Path::new("not-in-the-catalog")).await.unwrap();
+        let resolved = resolve(&cfg, Path::new("not-in-the-catalog"))
+            .await
+            .unwrap();
         assert_eq!(resolved, PathBuf::from("not-in-the-catalog"));
     }
 
@@ -398,17 +509,20 @@ mod tests {
         fs::write(&image_path, b"fake-image-bytes").unwrap();
         let sha256 = format!("{:x}", sha2::Sha256::digest(b"fake-image-bytes"));
 
-        let catalog_path = write_catalog(dir.path(), &[CatalogEntry {
-            name: "test-image".into(),
-            source: image_path.display().to_string(),
-            sha256,
-            format: "qcow2".into(),
-            distro: None,
-            version: None,
-            arch: None,
-            signature: None,
-            read_only: false,
-        }]);
+        let catalog_path = write_catalog(
+            dir.path(),
+            &[CatalogEntry {
+                name: "test-image".into(),
+                source: image_path.display().to_string(),
+                sha256,
+                format: "qcow2".into(),
+                distro: None,
+                version: None,
+                arch: None,
+                signature: None,
+                read_only: false,
+            }],
+        );
         let cfg = cfg_with_catalog(&catalog_path, vec![]); // no trusted_signers -> signature not required
 
         let resolved = resolve(&cfg, Path::new("test-image")).await.unwrap();
@@ -422,22 +536,28 @@ mod tests {
         fs::write(&image_path, b"original-bytes").unwrap();
         let sha256_of_original = format!("{:x}", sha2::Sha256::digest(b"original-bytes"));
 
-        let catalog_path = write_catalog(dir.path(), &[CatalogEntry {
-            name: "test-image".into(),
-            source: image_path.display().to_string(),
-            sha256: sha256_of_original,
-            format: "qcow2".into(),
-            distro: None,
-            version: None,
-            arch: None,
-            signature: None,
-            read_only: false,
-        }]);
+        let catalog_path = write_catalog(
+            dir.path(),
+            &[CatalogEntry {
+                name: "test-image".into(),
+                source: image_path.display().to_string(),
+                sha256: sha256_of_original,
+                format: "qcow2".into(),
+                distro: None,
+                version: None,
+                arch: None,
+                signature: None,
+                read_only: false,
+            }],
+        );
         let cfg = cfg_with_catalog(&catalog_path, vec![]);
 
         fs::write(&image_path, b"tampered-bytes-different-length!!").unwrap();
         let err = resolve(&cfg, Path::new("test-image")).await.unwrap_err();
-        assert!(format!("{err:#}").contains("checksum"), "unexpected error: {err:#}");
+        assert!(
+            format!("{err:#}").contains("checksum"),
+            "unexpected error: {err:#}"
+        );
     }
 
     #[test]
@@ -452,7 +572,8 @@ mod tests {
             Some("ubuntu".into()),
             Some("24.04".into()),
             Some("x86_64".into()),
-        ).unwrap();
+        )
+        .unwrap();
 
         let key = parse_public_key(&public_b64).unwrap();
         assert!(verify_signature(&entry, &[key]).is_ok());
@@ -462,7 +583,17 @@ mod tests {
     fn verify_rejects_a_signature_from_the_wrong_key() {
         let (private_b64, _public_b64) = generate_keypair();
         let (_other_private, other_public_b64) = generate_keypair();
-        let entry = sign_entry(&private_b64, "n".into(), "s".into(), "h".into(), "qcow2".into(), None, None, None).unwrap();
+        let entry = sign_entry(
+            &private_b64,
+            "n".into(),
+            "s".into(),
+            "h".into(),
+            "qcow2".into(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         let wrong_key = parse_public_key(&other_public_b64).unwrap();
         assert!(verify_signature(&entry, &[wrong_key]).is_err());
@@ -471,7 +602,17 @@ mod tests {
     #[test]
     fn verify_rejects_a_tampered_field_even_with_a_valid_signature_present() {
         let (private_b64, public_b64) = generate_keypair();
-        let mut entry = sign_entry(&private_b64, "n".into(), "s".into(), "h".into(), "qcow2".into(), None, None, None).unwrap();
+        let mut entry = sign_entry(
+            &private_b64,
+            "n".into(),
+            "s".into(),
+            "h".into(),
+            "qcow2".into(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         entry.sha256 = "different-hash-than-what-was-signed".into();
 
         let key = parse_public_key(&public_b64).unwrap();
@@ -482,42 +623,61 @@ mod tests {
     async fn resolve_fails_closed_when_trusted_signers_configured_but_entry_unsigned() {
         let dir = tempfile::tempdir().unwrap();
         let (_priv, public_b64) = generate_keypair();
-        let catalog_path = write_catalog(dir.path(), &[CatalogEntry {
-            name: "test-image".into(),
-            source: "/irrelevant".into(),
-            sha256: "irrelevant".into(),
-            format: "qcow2".into(),
-            distro: None,
-            version: None,
-            arch: None,
-            signature: None, // unsigned
-            read_only: false,
-        }]);
+        let catalog_path = write_catalog(
+            dir.path(),
+            &[CatalogEntry {
+                name: "test-image".into(),
+                source: "/irrelevant".into(),
+                sha256: "irrelevant".into(),
+                format: "qcow2".into(),
+                distro: None,
+                version: None,
+                arch: None,
+                signature: None, // unsigned
+                read_only: false,
+            }],
+        );
         let cfg = cfg_with_catalog(&catalog_path, vec![public_b64]);
 
         let err = resolve(&cfg, Path::new("test-image")).await.unwrap_err();
-        assert!(format!("{err:#}").contains("no signature"), "unexpected error: {err:#}");
+        assert!(
+            format!("{err:#}").contains("no signature"),
+            "unexpected error: {err:#}"
+        );
     }
 
     #[test]
     fn read_only_entry_refuses_remove_and_rename() {
         let dir = tempfile::tempdir().unwrap();
-        let catalog_path = write_catalog(dir.path(), &[CatalogEntry {
-            name: "base".into(),
-            source: "/irrelevant".into(),
-            sha256: "irrelevant".into(),
-            format: "qcow2".into(),
-            distro: None,
-            version: None,
-            arch: None,
-            signature: None,
-            read_only: false,
-        }]);
+        let catalog_path = write_catalog(
+            dir.path(),
+            &[CatalogEntry {
+                name: "base".into(),
+                source: "/irrelevant".into(),
+                sha256: "irrelevant".into(),
+                format: "qcow2".into(),
+                distro: None,
+                version: None,
+                arch: None,
+                signature: None,
+                read_only: false,
+            }],
+        );
         let cfg = cfg_with_catalog(&catalog_path, vec![]);
 
         set_read_only(&cfg, "base", true).unwrap();
-        assert!(remove_entry(&cfg, "base").unwrap_err().to_string().contains("read-only"));
-        assert!(rename_entry(&cfg, "base", "base2").unwrap_err().to_string().contains("read-only"));
+        assert!(
+            remove_entry(&cfg, "base")
+                .unwrap_err()
+                .to_string()
+                .contains("read-only")
+        );
+        assert!(
+            rename_entry(&cfg, "base", "base2")
+                .unwrap_err()
+                .to_string()
+                .contains("read-only")
+        );
 
         set_read_only(&cfg, "base", false).unwrap();
         remove_entry(&cfg, "base").unwrap();
@@ -531,20 +691,26 @@ mod tests {
         fs::write(downloads.join("kept.qcow2"), b"kept").unwrap();
         fs::write(downloads.join("orphan.qcow2"), b"orphan").unwrap();
 
-        let catalog_path = write_catalog(dir.path(), &[CatalogEntry {
-            name: "kept".into(),
-            source: "https://example.invalid/kept.qcow2".into(),
-            sha256: "irrelevant".into(),
-            format: "qcow2".into(),
-            distro: None,
-            version: None,
-            arch: None,
-            signature: None,
-            read_only: false,
-        }]);
+        let catalog_path = write_catalog(
+            dir.path(),
+            &[CatalogEntry {
+                name: "kept".into(),
+                source: "https://example.invalid/kept.qcow2".into(),
+                sha256: "irrelevant".into(),
+                format: "qcow2".into(),
+                distro: None,
+                version: None,
+                arch: None,
+                signature: None,
+                read_only: false,
+            }],
+        );
         let cfg = Config {
             state_dir: dir.path().to_path_buf(),
-            catalog: CatalogConfig { path: Some(catalog_path), trusted_signers: vec![] },
+            catalog: CatalogConfig {
+                path: Some(catalog_path),
+                trusted_signers: vec![],
+            },
             ..Config::default()
         };
 

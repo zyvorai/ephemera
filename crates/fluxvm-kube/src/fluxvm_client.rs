@@ -6,8 +6,8 @@
 //! fan-out to arbitrary nodes.
 
 use crate::crd::DisposableVmSpec;
-use anyhow::{bail, Context, Result};
-use serde_json::{json, Value};
+use anyhow::{Context, Result, bail};
+use serde_json::{Value, json};
 
 #[derive(Clone)]
 pub struct FluxVMClient {
@@ -18,11 +18,17 @@ pub struct FluxVMClient {
 
 impl FluxVMClient {
     pub fn new(base_url: String, token: Option<String>) -> Self {
-        Self { base_url, token, http: reqwest::Client::new() }
+        Self {
+            base_url,
+            token,
+            http: reqwest::Client::new(),
+        }
     }
 
     fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
-        let req = self.http.request(method, format!("{}{}", self.base_url, path));
+        let req = self
+            .http
+            .request(method, format!("{}{}", self.base_url, path));
         match &self.token {
             Some(t) => req.bearer_auth(t),
             None => req,
@@ -50,7 +56,8 @@ impl FluxVMClient {
             "storage": spec.storage,
             "ttl_seconds": spec.ttl_seconds,
         });
-        let resp = self.request(reqwest::Method::POST, "/v1/vms")
+        let resp = self
+            .request(reqwest::Method::POST, "/v1/vms")
             .json(&body)
             .send()
             .await
@@ -71,7 +78,8 @@ impl FluxVMClient {
     /// do, and what this originally did) never actually matches — this has
     /// to check the message text instead, matching the real contract.
     pub async fn get_vm(&self, id: &str) -> Result<Option<Value>> {
-        let resp = self.request(reqwest::Method::GET, &format!("/v1/vms/{id}"))
+        let resp = self
+            .request(reqwest::Method::GET, &format!("/v1/vms/{id}"))
             .send()
             .await
             .context("sending GET /v1/vms/{id}")?;
@@ -91,7 +99,8 @@ impl FluxVMClient {
     /// success — deleting an already-gone VM is exactly the outcome the
     /// caller wanted.
     pub async fn delete_vm(&self, id: &str) -> Result<()> {
-        let resp = self.request(reqwest::Method::DELETE, &format!("/v1/vms/{id}"))
+        let resp = self
+            .request(reqwest::Method::DELETE, &format!("/v1/vms/{id}"))
             .send()
             .await
             .context("sending DELETE /v1/vms/{id}")?;
@@ -121,7 +130,8 @@ async fn response_json_or_err(resp: reqwest::Response) -> Result<Value> {
     if !status.is_success() {
         bail!("fluxvm API returned {status}: {body}");
     }
-    serde_json::from_str(&body).with_context(|| format!("parsing fluxvm API response as JSON: {body}"))
+    serde_json::from_str(&body)
+        .with_context(|| format!("parsing fluxvm API response as JSON: {body}"))
 }
 
 /// A short, filesystem/name-safe suffix for the VM's display name — the
@@ -129,6 +139,9 @@ async fn response_json_or_err(resp: reqwest::Response) -> Result<Value> {
 /// this only needs to be readable in `fluxvm list` output.
 fn uuid_like_suffix() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
     format!("{:x}", nanos & 0xffff_ffff)
 }

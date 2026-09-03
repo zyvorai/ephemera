@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use axum::{
+    Extension, Json, Router,
     body::Body,
     extract::{Path, Query, Request, State},
-    http::{header, Method, StatusCode},
+    http::{Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{any, delete, get, post},
-    Extension, Json, Router,
 };
 use fluxvm_core::{
-    config::{constant_time_eq, Role},
+    config::{Role, constant_time_eq},
     model::{BackendKind, ClaimOverrides, CreateVmRequest, PoolSpec, VmRecord, VmStatus},
 };
 use fluxvm_image::{self as image, BuildImageRequest};
@@ -24,12 +24,25 @@ use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
 #[derive(Debug)]
-struct ApiError { status: StatusCode, message: String }
+struct ApiError {
+    status: StatusCode,
+    message: String,
+}
 impl<E: Into<anyhow::Error>> From<E> for ApiError {
-    fn from(e: E) -> Self { Self { status: StatusCode::BAD_REQUEST, message: format!("{:#}", e.into()) } }
+    fn from(e: E) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("{:#}", e.into()),
+        }
+    }
 }
 impl ApiError {
-    fn forbidden(message: impl Into<String>) -> Self { Self { status: StatusCode::FORBIDDEN, message: message.into() } }
+    fn forbidden(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: message.into(),
+        }
+    }
 }
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -44,7 +57,11 @@ type ApiResult<T> = Result<T, ApiError>;
 /// `cfg.auth.tokens` is empty, auth is off entirely and every request is
 /// treated as `Role::Admin` — this is what makes an un-opted-in deployment
 /// behave exactly like the pre-auth MVP.
-async fn auth_middleware(State(m): State<Arc<VmManager>>, mut req: Request, next: Next) -> Response {
+async fn auth_middleware(
+    State(m): State<Arc<VmManager>>,
+    mut req: Request,
+    next: Next,
+) -> Response {
     if req.uri().path() == "/healthz" {
         return next.run(req).await;
     }
@@ -57,7 +74,12 @@ async fn auth_middleware(State(m): State<Arc<VmManager>>, mut req: Request, next
             .and_then(|v| v.to_str().ok())
             .and_then(|h| h.strip_prefix("Bearer "));
         presented.and_then(|t| {
-            m.cfg.auth.tokens.iter().find(|entry| constant_time_eq(&entry.token, t)).map(|entry| entry.role)
+            m.cfg
+                .auth
+                .tokens
+                .iter()
+                .find(|entry| constant_time_eq(&entry.token, t))
+                .map(|entry| entry.role)
         })
     };
     match role {
@@ -65,7 +87,11 @@ async fn auth_middleware(State(m): State<Arc<VmManager>>, mut req: Request, next
             req.extensions_mut().insert(role);
             next.run(req).await
         }
-        None => (StatusCode::UNAUTHORIZED, Json(json!({"error": "missing or invalid bearer token"}))).into_response(),
+        None => (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "missing or invalid bearer token"})),
+        )
+            .into_response(),
     }
 }
 
@@ -83,7 +109,10 @@ pub fn router(manager: Arc<VmManager>) -> Router {
         .route("/v1/vms", post(create_vm).get(list_vms))
         .route("/v1/vms/{id}", get(get_vm).delete(delete_vm))
         .route("/v1/vms/{id}/start", post(start_vm))
-        .route("/v1/vms/{id}/start-from-snapshot", post(start_vm_from_snapshot))
+        .route(
+            "/v1/vms/{id}/start-from-snapshot",
+            post(start_vm_from_snapshot),
+        )
         .route("/v1/vms/{id}/stop", post(stop_vm))
         .route("/v1/vms/{id}/pause", post(pause_vm))
         .route("/v1/vms/{id}/resume", post(resume_vm))
@@ -104,8 +133,14 @@ pub fn router(manager: Arc<VmManager>) -> Router {
         .route("/v1/sandboxes/{id}/fs/read", post(sandbox_fs_read))
         .route("/v1/sandboxes/{id}/fs/write", post(sandbox_fs_write))
         .route("/v1/sandboxes/{id}/process", post(sandbox_process))
-        .route("/v1/sandboxes/{id}/http/{port}/{*path}", any(sandbox_http_proxy))
-        .route("/sandbox/{id}/{*path}", any(sandbox_http_proxy_default_port))
+        .route(
+            "/v1/sandboxes/{id}/http/{port}/{*path}",
+            any(sandbox_http_proxy),
+        )
+        .route(
+            "/sandbox/{id}/{*path}",
+            any(sandbox_http_proxy_default_port),
+        )
         .route("/v1/templates", get(list_templates).post(build_template))
         .route("/v1/egress/check", post(egress_check))
         .route("/v1/egress/nftables", get(egress_nftables))
@@ -114,9 +149,15 @@ pub fn router(manager: Arc<VmManager>) -> Router {
         .route("/v1/images/build", post(build_image))
         .route("/v1/images/catalog", post(add_catalog_entry))
         .route("/v1/images/catalog/{name}", delete(remove_catalog_entry))
-        .route("/v1/images/catalog/{name}/rename", post(rename_catalog_entry))
+        .route(
+            "/v1/images/catalog/{name}/rename",
+            post(rename_catalog_entry),
+        )
         .route("/v1/images/catalog/{name}/clone", post(clone_catalog_entry))
-        .route("/v1/images/catalog/{name}/export", post(export_catalog_entry))
+        .route(
+            "/v1/images/catalog/{name}/export",
+            post(export_catalog_entry),
+        )
         .route(
             "/v1/images/catalog/{name}/read-only",
             post(set_catalog_read_only),
@@ -126,14 +167,22 @@ pub fn router(manager: Arc<VmManager>) -> Router {
         .route("/v1/pools", post(create_pool).get(list_pools))
         .route("/v1/pools/{name}", get(get_pool).delete(delete_pool))
         .route("/v1/pools/{name}/claim", post(claim_pool))
-        .layer(middleware::from_fn_with_state(manager.clone(), auth_middleware))
+        .layer(middleware::from_fn_with_state(
+            manager.clone(),
+            auth_middleware,
+        ))
         .layer(TraceLayer::new_for_http())
         .with_state(manager)
 }
 
 async fn metrics(State(m): State<Arc<VmManager>>) -> Response {
     let body = render_metrics(&m.list().await);
-    (StatusCode::OK, [("content-type", "text/plain; version=0.0.4; charset=utf-8")], body).into_response()
+    (
+        StatusCode::OK,
+        [("content-type", "text/plain; version=0.0.4; charset=utf-8")],
+        body,
+    )
+        .into_response()
 }
 
 /// Pure text-rendering, kept separate from the handler so it's unit-testable
@@ -141,23 +190,49 @@ async fn metrics(State(m): State<Arc<VmManager>>) -> Response {
 fn render_metrics(vms: &[VmRecord]) -> String {
     let mut out = String::new();
 
-    out.push_str("# HELP fluxvm_vms_total Number of VMs known to this fluxvm instance, by status.\n");
+    out.push_str(
+        "# HELP fluxvm_vms_total Number of VMs known to this fluxvm instance, by status.\n",
+    );
     out.push_str("# TYPE fluxvm_vms_total gauge\n");
-    for status in [VmStatus::Creating, VmStatus::Running, VmStatus::Paused, VmStatus::Stopped, VmStatus::Failed] {
+    for status in [
+        VmStatus::Creating,
+        VmStatus::Running,
+        VmStatus::Paused,
+        VmStatus::Stopped,
+        VmStatus::Failed,
+    ] {
         let count = vms.iter().filter(|v| v.status == status).count();
-        out.push_str(&format!("fluxvm_vms_total{{status=\"{}\"}} {count}\n", status_label(status)));
+        out.push_str(&format!(
+            "fluxvm_vms_total{{status=\"{}\"}} {count}\n",
+            status_label(status)
+        ));
     }
 
-    out.push_str("# HELP fluxvm_vms_by_backend Number of VMs known to this fluxvm instance, by backend.\n");
+    out.push_str(
+        "# HELP fluxvm_vms_by_backend Number of VMs known to this fluxvm instance, by backend.\n",
+    );
     out.push_str("# TYPE fluxvm_vms_by_backend gauge\n");
-    for backend in [BackendKind::Qemu, BackendKind::CloudHypervisor, BackendKind::Firecracker, BackendKind::FluxVm] {
+    for backend in [
+        BackendKind::Qemu,
+        BackendKind::CloudHypervisor,
+        BackendKind::Firecracker,
+        BackendKind::FluxVm,
+    ] {
         let count = vms.iter().filter(|v| v.backend == backend).count();
-        out.push_str(&format!("fluxvm_vms_by_backend{{backend=\"{}\"}} {count}\n", backend_label(backend)));
+        out.push_str(&format!(
+            "fluxvm_vms_by_backend{{backend=\"{}\"}} {count}\n",
+            backend_label(backend)
+        ));
     }
 
-    out.push_str("# HELP fluxvm_vms_agent_enabled Number of VMs with the vsock guest agent enabled.\n");
+    out.push_str(
+        "# HELP fluxvm_vms_agent_enabled Number of VMs with the vsock guest agent enabled.\n",
+    );
     out.push_str("# TYPE fluxvm_vms_agent_enabled gauge\n");
-    let agent_enabled = vms.iter().filter(|v| v.request.agent.as_ref().is_some_and(|a| a.enabled)).count();
+    let agent_enabled = vms
+        .iter()
+        .filter(|v| v.request.agent.as_ref().is_some_and(|a| a.enabled))
+        .count();
     out.push_str(&format!("fluxvm_vms_agent_enabled {agent_enabled}\n"));
 
     out
@@ -183,7 +258,11 @@ fn backend_label(b: BackendKind) -> &'static str {
     }
 }
 
-async fn create_vm(State(m): State<Arc<VmManager>>, Extension(role): Extension<Role>, Json(req): Json<CreateVmRequest>) -> ApiResult<impl IntoResponse> {
+async fn create_vm(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Json(req): Json<CreateVmRequest>,
+) -> ApiResult<impl IntoResponse> {
     require_admin(role)?;
     Ok((StatusCode::CREATED, Json(m.create(req).await?)))
 }
@@ -256,7 +335,8 @@ async fn sandbox_fs_write(
     require_admin(role)?;
     m.ensure_running_for_request(id).await?;
     Ok(Json(json!(
-        m.put_file(id, body.path, body.content_base64, body.mode).await?
+        m.put_file(id, body.path, body.content_base64, body.mode)
+            .await?
     )))
 }
 
@@ -275,7 +355,9 @@ async fn sandbox_process(
 ) -> ApiResult<Json<serde_json::Value>> {
     require_admin(role)?;
     m.ensure_running_for_request(id).await?;
-    Ok(Json(json!(m.exec(id, body.command, body.timeout_seconds).await?)))
+    Ok(Json(json!(
+        m.exec(id, body.command, body.timeout_seconds).await?
+    )))
 }
 
 async fn sandbox_http_proxy_default_port(
@@ -304,7 +386,11 @@ async fn sandbox_proxy_inner(
     let vm = match m.ensure_running_for_request(id).await {
         Ok(v) => v,
         Err(e) => {
-            return (StatusCode::BAD_GATEWAY, format!("resume/get sandbox: {e:#}")).into_response()
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("resume/get sandbox: {e:#}"),
+            )
+                .into_response();
         }
     };
     let Some(guest_ip) = vm.guest_ip.clone() else {
@@ -338,7 +424,8 @@ async fn sandbox_proxy_inner(
     };
     match builder.body(body).send().await {
         Ok(up) => {
-            let status = StatusCode::from_u16(up.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+            let status =
+                StatusCode::from_u16(up.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let mut response = Response::builder().status(status);
             for (k, v) in up.headers().iter() {
                 response = response.header(k, v);
@@ -368,7 +455,10 @@ async fn build_template(
     Json(body): Json<BuildTemplateBody>,
 ) -> ApiResult<impl IntoResponse> {
     require_admin(role)?;
-    Ok((StatusCode::CREATED, Json(m.build_oci_template(&body.name, &body.image_ref).await?)))
+    Ok((
+        StatusCode::CREATED,
+        Json(m.build_oci_template(&body.name, &body.image_ref).await?),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -380,7 +470,10 @@ async fn egress_check(
     State(m): State<Arc<VmManager>>,
     Json(body): Json<EgressCheckBody>,
 ) -> Json<serde_json::Value> {
-    Json(json!(fluxvm_network::egress::decide(&m.cfg.sandbox, &body.host)))
+    Json(json!(fluxvm_network::egress::decide(
+        &m.cfg.sandbox,
+        &body.host
+    )))
 }
 
 async fn egress_nftables() -> impl IntoResponse {
@@ -462,17 +555,27 @@ struct ListVmsQuery {
     name: Option<String>,
 }
 
-async fn list_vms(State(m): State<Arc<VmManager>>, Query(q): Query<ListVmsQuery>) -> Json<serde_json::Value> {
+async fn list_vms(
+    State(m): State<Arc<VmManager>>,
+    Query(q): Query<ListVmsQuery>,
+) -> Json<serde_json::Value> {
     let mut items = m.list().await;
     if let Some(name) = q.name {
         items.retain(|vm| vm.name == name);
     }
     Json(json!({"items": items}))
 }
-async fn get_vm(State(m): State<Arc<VmManager>>, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
+async fn get_vm(
+    State(m): State<Arc<VmManager>>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
     Ok(Json(json!(m.get(id).await?)))
 }
-async fn start_vm(State(m): State<Arc<VmManager>>, Extension(role): Extension<Role>, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
+async fn start_vm(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
     require_admin(role)?;
     Ok(Json(json!(m.start(id).await?)))
 }
@@ -489,15 +592,27 @@ async fn start_vm_from_snapshot(
     require_admin(role)?;
     Ok(Json(json!(m.start_from_snapshot(id, &req.tag).await?)))
 }
-async fn stop_vm(State(m): State<Arc<VmManager>>, Extension(role): Extension<Role>, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
+async fn stop_vm(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
     require_admin(role)?;
     Ok(Json(json!(m.stop(id).await?)))
 }
-async fn pause_vm(State(m): State<Arc<VmManager>>, Extension(role): Extension<Role>, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
+async fn pause_vm(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
     require_admin(role)?;
     Ok(Json(json!(m.pause(id).await?)))
 }
-async fn resume_vm(State(m): State<Arc<VmManager>>, Extension(role): Extension<Role>, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
+async fn resume_vm(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
     require_admin(role)?;
     Ok(Json(json!(m.resume(id).await?)))
 }
@@ -513,31 +628,51 @@ async fn set_vm_resources(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn freeze_vm(State(m): State<Arc<VmManager>>, Extension(role): Extension<Role>, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+async fn freeze_vm(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<StatusCode> {
     require_admin(role)?;
     m.freeze(id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn thaw_vm(State(m): State<Arc<VmManager>>, Extension(role): Extension<Role>, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+async fn thaw_vm(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<StatusCode> {
     require_admin(role)?;
     m.thaw(id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn vm_frozen(State(m): State<Arc<VmManager>>, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
+async fn vm_frozen(
+    State(m): State<Arc<VmManager>>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
     Ok(Json(json!({"frozen": m.is_frozen(id).await?})))
 }
 
-async fn vm_stats(State(m): State<Arc<VmManager>>, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
+async fn vm_stats(
+    State(m): State<Arc<VmManager>>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
     Ok(Json(json!(m.metrics(id).await?)))
 }
 
-async fn vm_pressure(State(m): State<Arc<VmManager>>, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
+async fn vm_pressure(
+    State(m): State<Arc<VmManager>>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
     Ok(Json(json!(m.pressure(id).await?)))
 }
 
-async fn vm_cpuset(State(m): State<Arc<VmManager>>, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
+async fn vm_cpuset(
+    State(m): State<Arc<VmManager>>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
     Ok(Json(json!({"cpus": m.get_cpuset(id).await?})))
 }
 
@@ -548,7 +683,9 @@ struct LogsQuery {
     #[serde(default = "default_log_lines")]
     lines: usize,
 }
-fn default_log_lines() -> usize { 100 }
+fn default_log_lines() -> usize {
+    100
+}
 
 /// `GET /v1/vms/{id}/logs?lines=N&follow=true` — tail-follow the VM's
 /// captured console output (`VmRecord.log_path`) as a plain-text chunked
@@ -650,7 +787,9 @@ async fn agent_put_file(
     Json(req): Json<PutFileRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
     require_admin(role)?;
-    let response = m.put_file(id, req.path, req.content_base64, req.mode).await?;
+    let response = m
+        .put_file(id, req.path, req.content_base64, req.mode)
+        .await?;
     Ok(Json(json!(response)))
 }
 
@@ -675,8 +814,12 @@ struct ConsoleQuery {
     #[serde(default = "default_console_rows")]
     rows: u16,
 }
-fn default_console_cols() -> u16 { 80 }
-fn default_console_rows() -> u16 { 24 }
+fn default_console_cols() -> u16 {
+    80
+}
+fn default_console_rows() -> u16 {
+    24
+}
 
 /// `GET /v1/vms/{id}/console` — upgrades to a WebSocket carrying a live
 /// interactive shell (`AgentRequest::OpenShell` under the hood). Once the
@@ -699,7 +842,10 @@ async fn agent_console(
     Ok(ws.on_upgrade(move |socket| relay_console(socket, console)))
 }
 
-async fn relay_console(socket: axum::extract::ws::WebSocket, console: fluxvm_vsock_client::ConsoleStream) {
+async fn relay_console(
+    socket: axum::extract::ws::WebSocket,
+    console: fluxvm_vsock_client::ConsoleStream,
+) {
     use axum::extract::ws::Message;
     use futures::{SinkExt, StreamExt};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -726,7 +872,11 @@ async fn relay_console(socket: axum::extract::ws::WebSocket, console: fluxvm_vso
             match console_rx.read(&mut buf).await {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    if ws_tx.send(Message::Binary(buf[..n].to_vec().into())).await.is_err() {
+                    if ws_tx
+                        .send(Message::Binary(buf[..n].to_vec().into()))
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -739,12 +889,20 @@ async fn relay_console(socket: axum::extract::ws::WebSocket, console: fluxvm_vso
     }
 }
 
-async fn delete_vm(State(m): State<Arc<VmManager>>, Extension(role): Extension<Role>, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+async fn delete_vm(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<StatusCode> {
     require_admin(role)?;
     m.delete(id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
-async fn build_image(State(m): State<Arc<VmManager>>, Extension(role): Extension<Role>, Json(req): Json<BuildImageRequest>) -> ApiResult<Json<serde_json::Value>> {
+async fn build_image(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Json(req): Json<BuildImageRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
     require_admin(role)?;
     Ok(Json(json!(image::build_image(&m.cfg, &req).await?)))
 }
@@ -753,7 +911,9 @@ async fn build_image(State(m): State<Arc<VmManager>>, Extension(role): Extension
 /// signing itself is a CLI/offline operation (`fluxvm catalog sign`), not
 /// exposed here, so private keys never touch this API's surface.
 async fn list_catalog(State(m): State<Arc<VmManager>>) -> ApiResult<Json<serde_json::Value>> {
-    Ok(Json(json!({"items": image::catalog::list_with_verification(&m.cfg)?})))
+    Ok(Json(
+        json!({"items": image::catalog::list_with_verification(&m.cfg)?}),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -764,7 +924,9 @@ struct AddCatalogEntryRequest {
     #[serde(default = "default_catalog_format")]
     format: String,
 }
-fn default_catalog_format() -> String { "qcow2".into() }
+fn default_catalog_format() -> String {
+    "qcow2".into()
+}
 
 async fn add_catalog_entry(
     State(m): State<Arc<VmManager>>,
@@ -772,7 +934,9 @@ async fn add_catalog_entry(
     Json(req): Json<AddCatalogEntryRequest>,
 ) -> ApiResult<impl IntoResponse> {
     require_admin(role)?;
-    let entry = m.add_catalog_entry(req.name, req.source, req.format).await?;
+    let entry = m
+        .add_catalog_entry(req.name, req.source, req.format)
+        .await?;
     Ok((StatusCode::CREATED, Json(json!(entry))))
 }
 
@@ -855,17 +1019,28 @@ async fn clean_catalog(
     Ok(Json(json!({"removed": removed})))
 }
 
-async fn create_pool(State(m): State<Arc<VmManager>>, Extension(role): Extension<Role>, Json(spec): Json<PoolSpec>) -> ApiResult<impl IntoResponse> {
+async fn create_pool(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Json(spec): Json<PoolSpec>,
+) -> ApiResult<impl IntoResponse> {
     require_admin(role)?;
     Ok((StatusCode::CREATED, Json(m.create_pool(spec).await?)))
 }
 async fn list_pools(State(m): State<Arc<VmManager>>) -> Json<serde_json::Value> {
     Json(json!({"items": m.list_pools().await}))
 }
-async fn get_pool(State(m): State<Arc<VmManager>>, Path(name): Path<String>) -> ApiResult<Json<serde_json::Value>> {
+async fn get_pool(
+    State(m): State<Arc<VmManager>>,
+    Path(name): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
     Ok(Json(json!(m.get_pool(&name).await?)))
 }
-async fn delete_pool(State(m): State<Arc<VmManager>>, Extension(role): Extension<Role>, Path(name): Path<String>) -> ApiResult<StatusCode> {
+async fn delete_pool(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(name): Path<String>,
+) -> ApiResult<StatusCode> {
     require_admin(role)?;
     m.delete_pool(&name).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -920,7 +1095,11 @@ mod tests {
                 cloud_init: None,
                 ttl_seconds: None,
                 extra_args: vec![],
-                agent: agent_enabled.then(|| AgentSpec { enabled: true, port: 17777, token: None }),
+                agent: agent_enabled.then(|| AgentSpec {
+                    enabled: true,
+                    port: 17777,
+                    token: None,
+                }),
                 storage: Default::default(),
                 shared_folders: vec![],
             },
@@ -987,7 +1166,12 @@ mod tests {
             VmManager::new(cfg).unwrap()
         }
 
-        async fn status_for(app: Router, method: &str, uri: &str, bearer: Option<&str>) -> StatusCode {
+        async fn status_for(
+            app: Router,
+            method: &str,
+            uri: &str,
+            bearer: Option<&str>,
+        ) -> StatusCode {
             request(app, method, uri, bearer, None).await
         }
 
@@ -996,7 +1180,13 @@ mod tests {
         /// rejects with 415 during extraction (before the handler body, and
         /// so before this module's `require_admin` role check, ever runs)
         /// if the request has no JSON content-type at all.
-        async fn request(app: Router, method: &str, uri: &str, bearer: Option<&str>, body: Option<&str>) -> StatusCode {
+        async fn request(
+            app: Router,
+            method: &str,
+            uri: &str,
+            bearer: Option<&str>,
+            body: Option<&str>,
+        ) -> StatusCode {
             let mut builder = Request::builder().method(method).uri(uri);
             if let Some(t) = bearer {
                 builder = builder.header(header::AUTHORIZATION, format!("Bearer {t}"));
@@ -1015,48 +1205,104 @@ mod tests {
         #[tokio::test]
         async fn auth_disabled_allows_unauthenticated_requests() {
             let app = router(manager(AuthConfig::default()));
-            assert_eq!(status_for(app, "GET", "/v1/vms", None).await, StatusCode::OK);
+            assert_eq!(
+                status_for(app, "GET", "/v1/vms", None).await,
+                StatusCode::OK
+            );
         }
 
         #[tokio::test]
         async fn missing_token_is_rejected_when_auth_is_enabled() {
-            let auth = AuthConfig { tokens: vec![ApiToken { token: "secret".into(), role: Role::Admin, name: None }] };
+            let auth = AuthConfig {
+                tokens: vec![ApiToken {
+                    token: "secret".into(),
+                    role: Role::Admin,
+                    name: None,
+                }],
+            };
             let app = router(manager(auth));
-            assert_eq!(status_for(app, "GET", "/v1/vms", None).await, StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                status_for(app, "GET", "/v1/vms", None).await,
+                StatusCode::UNAUTHORIZED
+            );
         }
 
         #[tokio::test]
         async fn wrong_token_is_rejected() {
-            let auth = AuthConfig { tokens: vec![ApiToken { token: "secret".into(), role: Role::Admin, name: None }] };
+            let auth = AuthConfig {
+                tokens: vec![ApiToken {
+                    token: "secret".into(),
+                    role: Role::Admin,
+                    name: None,
+                }],
+            };
             let app = router(manager(auth));
-            assert_eq!(status_for(app, "GET", "/v1/vms", Some("nope")).await, StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                status_for(app, "GET", "/v1/vms", Some("nope")).await,
+                StatusCode::UNAUTHORIZED
+            );
         }
 
         #[tokio::test]
         async fn healthz_is_reachable_without_a_token_even_when_auth_is_enabled() {
-            let auth = AuthConfig { tokens: vec![ApiToken { token: "secret".into(), role: Role::Admin, name: None }] };
+            let auth = AuthConfig {
+                tokens: vec![ApiToken {
+                    token: "secret".into(),
+                    role: Role::Admin,
+                    name: None,
+                }],
+            };
             let app = router(manager(auth));
-            assert_eq!(status_for(app, "GET", "/healthz", None).await, StatusCode::OK);
+            assert_eq!(
+                status_for(app, "GET", "/healthz", None).await,
+                StatusCode::OK
+            );
         }
 
-        const VALID_CREATE_BODY: &str = r#"{"name":"t","backend":"qemu","image":"/does/not/exist.qcow2"}"#;
+        const VALID_CREATE_BODY: &str =
+            r#"{"name":"t","backend":"qemu","image":"/does/not/exist.qcow2"}"#;
 
         #[tokio::test]
         async fn readonly_token_can_list_but_not_create() {
-            let auth = AuthConfig { tokens: vec![ApiToken { token: "ro".into(), role: Role::ReadOnly, name: None }] };
+            let auth = AuthConfig {
+                tokens: vec![ApiToken {
+                    token: "ro".into(),
+                    role: Role::ReadOnly,
+                    name: None,
+                }],
+            };
             let app = router(manager(auth));
-            assert_eq!(status_for(app.clone(), "GET", "/v1/vms", Some("ro")).await, StatusCode::OK);
-            assert_eq!(request(app, "POST", "/v1/vms", Some("ro"), Some(VALID_CREATE_BODY)).await, StatusCode::FORBIDDEN);
+            assert_eq!(
+                status_for(app.clone(), "GET", "/v1/vms", Some("ro")).await,
+                StatusCode::OK
+            );
+            assert_eq!(
+                request(app, "POST", "/v1/vms", Some("ro"), Some(VALID_CREATE_BODY)).await,
+                StatusCode::FORBIDDEN
+            );
         }
 
         #[tokio::test]
         async fn admin_token_passes_auth_for_a_mutating_route() {
-            let auth = AuthConfig { tokens: vec![ApiToken { token: "admin".into(), role: Role::Admin, name: None }] };
+            let auth = AuthConfig {
+                tokens: vec![ApiToken {
+                    token: "admin".into(),
+                    role: Role::Admin,
+                    name: None,
+                }],
+            };
             let app = router(manager(auth));
             // The image path doesn't exist, so this fails downstream with
             // 400 — the point is it's NOT 401/403, i.e. the Admin token
             // cleared the auth layer and reached VmManager::create.
-            let status = request(app, "POST", "/v1/vms", Some("admin"), Some(VALID_CREATE_BODY)).await;
+            let status = request(
+                app,
+                "POST",
+                "/v1/vms",
+                Some("admin"),
+                Some(VALID_CREATE_BODY),
+            )
+            .await;
             assert_eq!(status, StatusCode::BAD_REQUEST);
         }
     }

@@ -184,11 +184,7 @@ fn parse_io_max_for_device(path: &Path, content: &str, target: DeviceId) -> Resu
 }
 
 fn parse_io_limit(s: &str) -> Option<u64> {
-    if s == "max" {
-        None
-    } else {
-        s.parse().ok()
-    }
+    if s == "max" { None } else { s.parse().ok() }
 }
 
 fn parse_io_stat(path: &Path, content: &str) -> Result<Vec<IoStat>> {

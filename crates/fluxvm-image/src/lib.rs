@@ -6,12 +6,16 @@ pub mod cloudinit;
 pub mod oci;
 pub mod storage;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use fluxvm_core::{config::Config, model::BackendKind, process::run_checked};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, fs, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 use tokio::{fs as async_fs, io::AsyncWriteExt};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,7 +48,9 @@ pub struct BuildImageRequest {
     #[serde(default)]
     pub enable_services: Vec<String>,
 }
-fn default_format() -> String { "qcow2".into() }
+fn default_format() -> String {
+    "qcow2".into()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CopyIn {
@@ -64,43 +70,77 @@ pub(crate) async fn fetch_if_needed(cfg: &Config, source: &str) -> Result<PathBu
     }
     let downloads = cfg.state_dir.join("downloads");
     fs::create_dir_all(&downloads)?;
-    let name = source.rsplit('/').next().filter(|s| !s.is_empty()).unwrap_or("base.img");
+    let name = source
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("base.img");
     let dest = downloads.join(name);
-    if dest.exists() { return Ok(dest); }
+    if dest.exists() {
+        return Ok(dest);
+    }
     let mut resp = Client::new().get(source).send().await?.error_for_status()?;
     let mut f = async_fs::File::create(&dest).await?;
-    while let Some(chunk) = resp.chunk().await? { f.write_all(&chunk).await?; }
+    while let Some(chunk) = resp.chunk().await? {
+        f.write_all(&chunk).await?;
+    }
     Ok(dest)
 }
 
 pub(crate) fn verify_sha256(path: &Path, wanted: &str) -> Result<()> {
     let bytes = fs::read(path)?;
     let got = format!("{:x}", Sha256::digest(&bytes));
-    if !got.eq_ignore_ascii_case(wanted) { bail!("sha256 mismatch: expected {wanted}, got {got}"); }
+    if !got.eq_ignore_ascii_case(wanted) {
+        bail!("sha256 mismatch: expected {wanted}, got {got}");
+    }
     Ok(())
 }
 
 pub async fn build_image(cfg: &Config, req: &BuildImageRequest) -> Result<BuildImageResult> {
     let src = fetch_if_needed(cfg, &req.source).await?;
-    if let Some(hash) = &req.sha256 { verify_sha256(&src, hash)?; }
-    if let Some(parent) = req.output.parent() { fs::create_dir_all(parent)?; }
-
-    run_checked(&cfg.qemu_img_binary, &[
-        "convert".into(), "-O".into(), req.format.clone(),
-        src.display().to_string(), req.output.display().to_string(),
-    ]).await?;
-    if let Some(size) = req.size_gib {
-        run_checked(&cfg.qemu_img_binary, &[
-            "resize".into(), req.output.display().to_string(), format!("{}G", size)
-        ]).await?;
+    if let Some(hash) = &req.sha256 {
+        verify_sha256(&src, hash)?;
+    }
+    if let Some(parent) = req.output.parent() {
+        fs::create_dir_all(parent)?;
     }
 
-    let needs_customize = !req.copy_in.is_empty() || !req.enable_services.is_empty()
-        || req.hostname.is_some() || !req.packages.is_empty() || !req.commands.is_empty() || req.ssh_key.is_some();
+    run_checked(
+        &cfg.qemu_img_binary,
+        &[
+            "convert".into(),
+            "-O".into(),
+            req.format.clone(),
+            src.display().to_string(),
+            req.output.display().to_string(),
+        ],
+    )
+    .await?;
+    if let Some(size) = req.size_gib {
+        run_checked(
+            &cfg.qemu_img_binary,
+            &[
+                "resize".into(),
+                req.output.display().to_string(),
+                format!("{}G", size),
+            ],
+        )
+        .await?;
+    }
+
+    let needs_customize = !req.copy_in.is_empty()
+        || !req.enable_services.is_empty()
+        || req.hostname.is_some()
+        || !req.packages.is_empty()
+        || !req.commands.is_empty()
+        || req.ssh_key.is_some();
     if needs_customize {
         customize_image(req.output.clone(), req.clone()).await?;
     }
-    Ok(BuildImageResult { output: req.output.clone(), format: req.format.clone() })
+    Ok(BuildImageResult {
+        output: req.output.clone(),
+        format: req.format.clone(),
+    })
 }
 
 /// Applies every customization field on `req` (`copy_in`, `enable_services`,
@@ -143,19 +183,28 @@ fn customize_image_blocking(image: &Path, req: &BuildImageRequest) -> Result<()>
     use guestkit::Guestfs;
 
     let mut g = Guestfs::new().context("creating guestkit handle")?;
-    g.add_drive(image).with_context(|| format!("adding drive {}", image.display()))?;
+    g.add_drive(image)
+        .with_context(|| format!("adding drive {}", image.display()))?;
     g.launch().context("launching guestfs")?;
 
     let roots = g.inspect_os().context("inspecting guest OS")?;
-    let root = roots.first().context("no operating system found in image")?.clone();
-    let mounts = g.inspect_get_mountpoints(&root).context("getting mountpoints")?;
+    let root = roots
+        .first()
+        .context("no operating system found in image")?
+        .clone();
+    let mounts = g
+        .inspect_get_mountpoints(&root)
+        .context("getting mountpoints")?;
     for (mountpoint, device) in &depth_ordered_mounts(mounts) {
         g.mount(device, mountpoint)
             .with_context(|| format!("mounting {device} at {mountpoint}"))?;
     }
 
     for file in &req.copy_in {
-        let src = file.src.to_str().context("copy_in src path is not valid UTF-8")?;
+        let src = file
+            .src
+            .to_str()
+            .context("copy_in src path is not valid UTF-8")?;
         g.upload(src, &file.dest)
             .with_context(|| format!("copying {} to {} in image", file.src.display(), file.dest))?;
     }
@@ -170,7 +219,8 @@ fn customize_image_blocking(image: &Path, req: &BuildImageRequest) -> Result<()>
     }
 
     for cmd in &req.commands {
-        g.sh_raw(cmd).with_context(|| format!("running command: {cmd}"))?;
+        g.sh_raw(cmd)
+            .with_context(|| format!("running command: {cmd}"))?;
     }
 
     for service in &req.enable_services {
@@ -211,13 +261,16 @@ fn install_packages_with_dns(g: &mut guestkit::Guestfs, packages: &[String]) -> 
     // entirely. Removing it via a chroot `rm -f` first sidesteps both: the
     // chroot resolves the path against the guest root, not the host's.
     let _ = g.command(&["rm", "-f", "/etc/resolv.conf"]);
-    g.write("/etc/resolv.conf", &host_resolv).context("staging /etc/resolv.conf for package install")?;
+    g.write("/etc/resolv.conf", &host_resolv)
+        .context("staging /etc/resolv.conf for package install")?;
 
     let result = install_packages(g, packages);
 
     let _ = g.command(&["rm", "-f", "/etc/resolv.conf"]);
     match &original {
-        Some(bytes) => { let _ = g.write("/etc/resolv.conf", bytes); }
+        Some(bytes) => {
+            let _ = g.write("/etc/resolv.conf", bytes);
+        }
         None => {}
     }
     result
@@ -235,14 +288,17 @@ fn install_packages_with_dns(g: &mut guestkit::Guestfs, packages: &[String]) -> 
 /// the chroot sidesteps that bug entirely.
 fn install_packages(g: &mut guestkit::Guestfs, packages: &[String]) -> Result<()> {
     let pkgs: Vec<&str> = packages.iter().map(String::as_str).collect();
-    let tool = ["apt-get", "tdnf", "dnf", "yum", "pacman"].into_iter().find(|tool| {
-        g.command(&["sh", "-c", &format!("command -v {tool}")])
-            .map(|out| !out.trim().is_empty())
-            .unwrap_or(false)
-    });
+    let tool = ["apt-get", "tdnf", "dnf", "yum", "pacman"]
+        .into_iter()
+        .find(|tool| {
+            g.command(&["sh", "-c", &format!("command -v {tool}")])
+                .map(|out| !out.trim().is_empty())
+                .unwrap_or(false)
+        });
     match tool {
         Some("apt-get") => {
-            g.command(&["apt-get", "update"]).context("apt-get update")?;
+            g.command(&["apt-get", "update"])
+                .context("apt-get update")?;
             let mut args = vec!["apt-get", "install", "-y"];
             args.extend(pkgs);
             g.command(&args).context("apt-get install")?;
@@ -258,11 +314,15 @@ fn install_packages(g: &mut guestkit::Guestfs, packages: &[String]) -> Result<()
             // initialized — real, standard Arch chroot bootstrapping, not
             // specific to this bare chroot (confirmed against a real Arch
             // Linux cloud image).
-            g.command(&["pacman-key", "--init"]).context("pacman-key --init")?;
-            g.command(&["pacman-key", "--populate", "archlinux"]).context("pacman-key --populate")?;
+            g.command(&["pacman-key", "--init"])
+                .context("pacman-key --init")?;
+            g.command(&["pacman-key", "--populate", "archlinux"])
+                .context("pacman-key --populate")?;
             let mut args = vec!["pacman", "-Sy", "--noconfirm"];
             args.extend(pkgs);
-            let result = with_staged_mtab(g, |g| g.command(&args).context("pacman install").map(|_| ()));
+            let result = with_staged_mtab(g, |g| {
+                g.command(&args).context("pacman install").map(|_| ())
+            });
             // pacman-key/pacman spawn a gpg-agent that double-forks and
             // detaches, inheriting the chroot's root directory — guestkit's
             // chroot exec only waits on the direct child, so the detached
@@ -306,7 +366,8 @@ fn with_staged_mtab(
 ) -> Result<()> {
     let original = g.read_file("/etc/mtab").ok();
     let _ = g.command(&["rm", "-f", "/etc/mtab"]);
-    g.write("/etc/mtab", b"rootfs / rootfs rw 0 0\n").context("staging /etc/mtab for pacman")?;
+    g.write("/etc/mtab", b"rootfs / rootfs rw 0 0\n")
+        .context("staging /etc/mtab for pacman")?;
 
     let result = f(g);
 
@@ -321,14 +382,22 @@ fn with_staged_mtab(
 /// `/root/.ssh/authorized_keys`, creating the file/directory if needed.
 /// Inject an SSH public key into the guest's `authorized_keys` via guestkit.
 fn inject_ssh_key(g: &mut guestkit::Guestfs, key: &str) -> Result<()> {
-    g.command(&["mkdir", "-p", "/root/.ssh"]).context("creating /root/.ssh")?;
-    g.command(&["chmod", "700", "/root/.ssh"]).context("chmod /root/.ssh")?;
-    let mut content = g.command(&["cat", "/root/.ssh/authorized_keys"]).unwrap_or_default();
-    if !content.is_empty() && !content.ends_with('\n') { content.push('\n'); }
+    g.command(&["mkdir", "-p", "/root/.ssh"])
+        .context("creating /root/.ssh")?;
+    g.command(&["chmod", "700", "/root/.ssh"])
+        .context("chmod /root/.ssh")?;
+    let mut content = g
+        .command(&["cat", "/root/.ssh/authorized_keys"])
+        .unwrap_or_default();
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
     content.push_str(key.trim());
     content.push('\n');
-    g.write("/root/.ssh/authorized_keys", content.as_bytes()).context("writing authorized_keys")?;
-    g.command(&["chmod", "600", "/root/.ssh/authorized_keys"]).context("chmod authorized_keys")?;
+    g.write("/root/.ssh/authorized_keys", content.as_bytes())
+        .context("writing authorized_keys")?;
+    g.command(&["chmod", "600", "/root/.ssh/authorized_keys"])
+        .context("chmod authorized_keys")?;
     Ok(())
 }
 
@@ -357,12 +426,17 @@ fn inject_guest_agent_token_blocking(disk: &Path, token: &str) -> Result<()> {
         g.set_debug(true);
         g.set_trace(true);
     }
-    g.add_drive(disk).with_context(|| format!("adding drive {}", disk.display()))?;
+    g.add_drive(disk)
+        .with_context(|| format!("adding drive {}", disk.display()))?;
     g.launch().context("launching guestfs")?;
 
     let roots = g.inspect_os().context("inspecting guest OS")?;
-    let root = roots.first().context("no operating system found in image")?;
-    let mounts = g.inspect_get_mountpoints(root).context("getting mountpoints")?;
+    let root = roots
+        .first()
+        .context("no operating system found in image")?;
+    let mounts = g
+        .inspect_get_mountpoints(root)
+        .context("getting mountpoints")?;
     for (mountpoint, device) in &depth_ordered_mounts(mounts) {
         g.mount(device, mountpoint)
             .with_context(|| format!("mounting {device} at {mountpoint}"))?;
@@ -370,7 +444,8 @@ fn inject_guest_agent_token_blocking(disk: &Path, token: &str) -> Result<()> {
 
     g.write(TOKEN_FILE_PATH, token.as_bytes())
         .with_context(|| format!("writing {TOKEN_FILE_PATH}"))?;
-    g.chmod(0o600, TOKEN_FILE_PATH).context("chmod guest-agent token file")?;
+    g.chmod(0o600, TOKEN_FILE_PATH)
+        .context("chmod guest-agent token file")?;
 
     let _ = g.umount_all();
     g.shutdown().context("shutting down guestfs")?;
@@ -378,48 +453,90 @@ fn inject_guest_agent_token_blocking(disk: &Path, token: &str) -> Result<()> {
 }
 
 async fn image_format(cfg: &Config, image: &Path) -> String {
-    fluxvm_core::process::output_checked(&cfg.qemu_img_binary, &[
-        "info".into(), "--output=json".into(), image.display().to_string()
-    ]).await.ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.get("format").and_then(|f| f.as_str()).map(str::to_owned))
-        .unwrap_or_else(|| "qcow2".into())
+    fluxvm_core::process::output_checked(
+        &cfg.qemu_img_binary,
+        &[
+            "info".into(),
+            "--output=json".into(),
+            image.display().to_string(),
+        ],
+    )
+    .await
+    .ok()
+    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+    .and_then(|v| v.get("format").and_then(|f| f.as_str()).map(str::to_owned))
+    .unwrap_or_else(|| "qcow2".into())
 }
 
-pub async fn clone_for_vm(cfg: &Config, base: &Path, backend: BackendKind, out: &Path, size_gib: Option<u64>) -> Result<()> {
+pub async fn clone_for_vm(
+    cfg: &Config,
+    base: &Path,
+    backend: BackendKind,
+    out: &Path,
+    size_gib: Option<u64>,
+) -> Result<()> {
     let base_fmt = image_format(cfg, base).await;
     match backend {
         BackendKind::Qemu => {
             // Cheap disposable copy-on-write layer.
-            run_checked(&cfg.qemu_img_binary, &[
-                "create".into(), "-f".into(), "qcow2".into(),
-                "-F".into(), base_fmt,
-                "-b".into(), base.canonicalize()?.display().to_string(),
-                out.display().to_string(),
-            ]).await?;
+            run_checked(
+                &cfg.qemu_img_binary,
+                &[
+                    "create".into(),
+                    "-f".into(),
+                    "qcow2".into(),
+                    "-F".into(),
+                    base_fmt,
+                    "-b".into(),
+                    base.canonicalize()?.display().to_string(),
+                    out.display().to_string(),
+                ],
+            )
+            .await?;
         }
         BackendKind::CloudHypervisor | BackendKind::Firecracker | BackendKind::FluxVm => {
             // Firecracker / FluxVm expect a raw block image. Cloud Hypervisor is also kept raw here
             // for a predictable common fast path. Reflink makes raw clones nearly instant on
             // XFS/Btrfs; cp transparently falls back when reflinks are unavailable.
             if base_fmt == "raw" {
-                run_checked("cp", &[
-                    "--reflink=auto".into(), "--sparse=always".into(),
-                    base.display().to_string(), out.display().to_string(),
-                ]).await?;
+                run_checked(
+                    "cp",
+                    &[
+                        "--reflink=auto".into(),
+                        "--sparse=always".into(),
+                        base.display().to_string(),
+                        out.display().to_string(),
+                    ],
+                )
+                .await?;
             } else {
-                run_checked(&cfg.qemu_img_binary, &[
-                    "convert".into(), "-O".into(), "raw".into(),
-                    base.display().to_string(), out.display().to_string(),
-                ]).await?;
+                run_checked(
+                    &cfg.qemu_img_binary,
+                    &[
+                        "convert".into(),
+                        "-O".into(),
+                        "raw".into(),
+                        base.display().to_string(),
+                        out.display().to_string(),
+                    ],
+                )
+                .await?;
             }
         }
-        BackendKind::Auto => bail!("VM has an unresolved BackendKind::Auto — this is a bug, backend selection must happen before cloning its disk"),
+        BackendKind::Auto => bail!(
+            "VM has an unresolved BackendKind::Auto — this is a bug, backend selection must happen before cloning its disk"
+        ),
     }
     if let Some(size) = size_gib {
-        run_checked(&cfg.qemu_img_binary, &[
-            "resize".into(), out.display().to_string(), format!("{}G", size)
-        ]).await?;
+        run_checked(
+            &cfg.qemu_img_binary,
+            &[
+                "resize".into(),
+                out.display().to_string(),
+                format!("{}G", size),
+            ],
+        )
+        .await?;
     }
     Ok(())
 }

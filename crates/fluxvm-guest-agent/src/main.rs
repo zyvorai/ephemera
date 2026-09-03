@@ -5,18 +5,18 @@
 //! a thread per connection), reads one newline-delimited JSON request, acts
 //! on it, and writes one newline-delimited JSON response.
 
+#[cfg(target_os = "linux")]
+use anyhow::Context;
 use anyhow::Result;
+#[cfg(target_os = "linux")]
+use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use clap::Parser;
 use fluxvm_guest_protocol::DEFAULT_PORT;
 #[cfg(target_os = "linux")]
-use anyhow::Context;
-#[cfg(target_os = "linux")]
 use fluxvm_guest_protocol::{
-    constant_time_eq, decode_line, encode_line, AgentRequest, AgentResponse, Envelope,
-    DEFAULT_EXEC_TIMEOUT_SECS, MAX_FILE_TRANSFER_BYTES, TOKEN_FILE_PATH,
+    AgentRequest, AgentResponse, DEFAULT_EXEC_TIMEOUT_SECS, Envelope, MAX_FILE_TRANSFER_BYTES,
+    TOKEN_FILE_PATH, constant_time_eq, decode_line, encode_line,
 };
-#[cfg(target_os = "linux")]
-use base64::{engine::general_purpose::STANDARD as B64, Engine};
 #[cfg(target_os = "linux")]
 use std::io::{BufRead, BufReader, Write};
 #[cfg(target_os = "linux")]
@@ -27,7 +27,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[derive(Parser)]
-#[command(name = "fluxvm-guest-agent", version, about = "Zyvor FluxVM in-guest agent")]
+#[command(
+    name = "fluxvm-guest-agent",
+    version,
+    about = "Zyvor FluxVM in-guest agent"
+)]
 struct Cli {
     /// AF_VSOCK port to listen on.
     #[arg(long, default_value_t = DEFAULT_PORT)]
@@ -50,9 +54,13 @@ fn run_server(port: u32) -> Result<()> {
             .filter(|s| !s.is_empty()),
     );
     if expected_token.is_some() {
-        eprintln!("fluxvm-guest-agent: token found at {TOKEN_FILE_PATH}, requests must authenticate");
+        eprintln!(
+            "fluxvm-guest-agent: token found at {TOKEN_FILE_PATH}, requests must authenticate"
+        );
     } else {
-        eprintln!("fluxvm-guest-agent: WARNING no token at {TOKEN_FILE_PATH} — running unauthenticated, any vsock caller can run commands as root");
+        eprintln!(
+            "fluxvm-guest-agent: WARNING no token at {TOKEN_FILE_PATH} — running unauthenticated, any vsock caller can run commands as root"
+        );
     }
 
     let listener_fd = unsafe {
@@ -72,7 +80,10 @@ fn run_server(port: u32) -> Result<()> {
             std::mem::size_of::<libc::sockaddr_vm>() as libc::socklen_t,
         ) != 0
         {
-            anyhow::bail!("bind(vsock port={port}): {}", std::io::Error::last_os_error());
+            anyhow::bail!(
+                "bind(vsock port={port}): {}",
+                std::io::Error::last_os_error()
+            );
         }
         if libc::listen(fd, 16) != 0 {
             anyhow::bail!("listen: {}", std::io::Error::last_os_error());
@@ -84,7 +95,8 @@ fn run_server(port: u32) -> Result<()> {
     eprintln!("fluxvm-guest-agent listening on vsock port {port}");
 
     loop {
-        let conn_fd = unsafe { libc::accept(listener_fd, std::ptr::null_mut(), std::ptr::null_mut()) };
+        let conn_fd =
+            unsafe { libc::accept(listener_fd, std::ptr::null_mut(), std::ptr::null_mut()) };
         if conn_fd < 0 {
             eprintln!("accept failed: {}", std::io::Error::last_os_error());
             continue;
@@ -105,7 +117,11 @@ fn run_server(_port: u32) -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn handle_connection(file: std::fs::File, expected_token: &Option<String>, listener_fd: i32) -> Result<()> {
+fn handle_connection(
+    file: std::fs::File,
+    expected_token: &Option<String>,
+    listener_fd: i32,
+) -> Result<()> {
     let mut writer = file.try_clone().context("cloning connection fd")?;
     let mut reader = BufReader::new(file);
 
@@ -116,9 +132,17 @@ fn handle_connection(file: std::fs::File, expected_token: &Option<String>, liste
     let envelope: Envelope = decode_line(&line).context("parsing request")?;
 
     if let Some(expected) = expected_token {
-        let authorized = envelope.token.as_deref().is_some_and(|got| constant_time_eq(expected, got));
+        let authorized = envelope
+            .token
+            .as_deref()
+            .is_some_and(|got| constant_time_eq(expected, got));
         if !authorized {
-            writer.write_all(encode_line(&AgentResponse::Error { message: "unauthorized: missing or incorrect token".into() })?.as_bytes())?;
+            writer.write_all(
+                encode_line(&AgentResponse::Error {
+                    message: "unauthorized: missing or incorrect token".into(),
+                })?
+                .as_bytes(),
+            )?;
             writer.flush()?;
             return Ok(());
         }
@@ -126,10 +150,18 @@ fn handle_connection(file: std::fs::File, expected_token: &Option<String>, liste
 
     let response = match envelope.request {
         AgentRequest::Ping => AgentResponse::Pong,
-        AgentRequest::Exec { command, timeout_seconds } => {
-            exec_with_timeout(&command, Duration::from_secs(timeout_seconds.unwrap_or(DEFAULT_EXEC_TIMEOUT_SECS)))
-        }
-        AgentRequest::PutFile { path, content_base64, mode } => put_file(&path, &content_base64, mode),
+        AgentRequest::Exec {
+            command,
+            timeout_seconds,
+        } => exec_with_timeout(
+            &command,
+            Duration::from_secs(timeout_seconds.unwrap_or(DEFAULT_EXEC_TIMEOUT_SECS)),
+        ),
+        AgentRequest::PutFile {
+            path,
+            content_base64,
+            mode,
+        } => put_file(&path, &content_base64, mode),
         AgentRequest::GetFile { path } => get_file(&path),
         AgentRequest::OpenShell { cols, rows } => {
             // Leftover bytes the BufReader already pulled off the wire past
@@ -199,7 +231,10 @@ fn spawn_open_shell_session(
     unsafe {
         let pid1 = libc::fork();
         if pid1 < 0 {
-            anyhow::bail!("fork (session isolation) failed: {}", std::io::Error::last_os_error());
+            anyhow::bail!(
+                "fork (session isolation) failed: {}",
+                std::io::Error::last_os_error()
+            );
         }
         if pid1 == 0 {
             libc::close(listener_fd);
@@ -249,7 +284,12 @@ fn open_shell(
     let master_fd = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY) };
     if master_fd < 0 {
         let err = std::io::Error::last_os_error();
-        writer.write_all(encode_line(&AgentResponse::Error { message: format!("posix_openpt: {err}") })?.as_bytes())?;
+        writer.write_all(
+            encode_line(&AgentResponse::Error {
+                message: format!("posix_openpt: {err}"),
+            })?
+            .as_bytes(),
+        )?;
         writer.flush()?;
         return Ok(());
     }
@@ -267,23 +307,38 @@ fn open_shell(
         }
         let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
         buf.truncate(end);
-        Ok(std::path::PathBuf::from(String::from_utf8_lossy(&buf).into_owned()))
+        Ok(std::path::PathBuf::from(
+            String::from_utf8_lossy(&buf).into_owned(),
+        ))
     })();
     let slave_path = match setup {
         Ok(p) => p,
         Err(e) => {
             unsafe { libc::close(master_fd) };
-            writer.write_all(encode_line(&AgentResponse::Error { message: e.to_string() })?.as_bytes())?;
+            writer.write_all(
+                encode_line(&AgentResponse::Error {
+                    message: e.to_string(),
+                })?
+                .as_bytes(),
+            )?;
             writer.flush()?;
             return Ok(());
         }
     };
 
-    let winsize = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+    let winsize = libc::winsize {
+        ws_row: rows,
+        ws_col: cols,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
     unsafe { libc::ioctl(master_fd, libc::TIOCSWINSZ, &winsize) };
 
     let spawn_result = (|| -> Result<std::process::Child> {
-        let slave0 = std::fs::OpenOptions::new().read(true).write(true).open(&slave_path)?;
+        let slave0 = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&slave_path)?;
         let slave1 = slave0.try_clone()?;
         let slave2 = slave0.try_clone()?;
         // `TIOCSCTTY` on an *inherited* PTY fd can fail EPERM in some
@@ -297,7 +352,9 @@ fn open_shell(
         let slave_path_c = std::ffi::CString::new(slave_path.as_os_str().as_encoded_bytes())
             .context("slave PTY path contains a NUL byte")?;
         let mut cmd = Command::new("/bin/sh");
-        cmd.stdin(Stdio::from(slave0)).stdout(Stdio::from(slave1)).stderr(Stdio::from(slave2));
+        cmd.stdin(Stdio::from(slave0))
+            .stdout(Stdio::from(slave1))
+            .stderr(Stdio::from(slave2));
         unsafe {
             use std::os::unix::process::CommandExt;
             cmd.pre_exec(move || {
@@ -319,7 +376,12 @@ fn open_shell(
         Ok(c) => c,
         Err(e) => {
             unsafe { libc::close(master_fd) };
-            writer.write_all(encode_line(&AgentResponse::Error { message: format!("spawning shell: {e}") })?.as_bytes())?;
+            writer.write_all(
+                encode_line(&AgentResponse::Error {
+                    message: format!("spawning shell: {e}"),
+                })?
+                .as_bytes(),
+            )?;
             writer.flush()?;
             return Ok(());
         }
@@ -412,7 +474,11 @@ fn exec_with_timeout(command: &str, timeout: Duration) -> AgentResponse {
         .spawn()
     {
         Ok(c) => c,
-        Err(e) => return AgentResponse::Error { message: format!("spawning command: {e}") },
+        Err(e) => {
+            return AgentResponse::Error {
+                message: format!("spawning command: {e}"),
+            };
+        }
     };
 
     let stdout_pipe = child.stdout.take().expect("stdout was piped");
@@ -444,7 +510,11 @@ fn exec_with_timeout(command: &str, timeout: Duration) -> AgentResponse {
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
-            Err(e) => return AgentResponse::Error { message: format!("waiting on command: {e}") },
+            Err(e) => {
+                return AgentResponse::Error {
+                    message: format!("waiting on command: {e}"),
+                };
+            }
         }
     };
 
@@ -452,9 +522,16 @@ fn exec_with_timeout(command: &str, timeout: Duration) -> AgentResponse {
     let stderr = stderr_reader.join().unwrap_or_default();
 
     match status {
-        Some(status) => AgentResponse::Exec { exit_code: status.code().unwrap_or(-1), stdout, stderr },
+        Some(status) => AgentResponse::Exec {
+            exit_code: status.code().unwrap_or(-1),
+            stdout,
+            stderr,
+        },
         None => AgentResponse::Error {
-            message: format!("command exceeded {}s timeout and was killed", timeout.as_secs()),
+            message: format!(
+                "command exceeded {}s timeout and was killed",
+                timeout.as_secs()
+            ),
         },
     }
 }
@@ -463,25 +540,39 @@ fn exec_with_timeout(command: &str, timeout: Duration) -> AgentResponse {
 fn put_file(path: &str, content_base64: &str, mode: Option<u32>) -> AgentResponse {
     let bytes = match B64.decode(content_base64) {
         Ok(b) => b,
-        Err(e) => return AgentResponse::Error { message: format!("content is not valid base64: {e}") },
+        Err(e) => {
+            return AgentResponse::Error {
+                message: format!("content is not valid base64: {e}"),
+            };
+        }
     };
     if bytes.len() > MAX_FILE_TRANSFER_BYTES {
         return AgentResponse::Error {
-            message: format!("content is {} bytes, exceeds the {}-byte transfer limit", bytes.len(), MAX_FILE_TRANSFER_BYTES),
+            message: format!(
+                "content is {} bytes, exceeds the {}-byte transfer limit",
+                bytes.len(),
+                MAX_FILE_TRANSFER_BYTES
+            ),
         };
     }
     if let Some(parent) = std::path::Path::new(path).parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
-            return AgentResponse::Error { message: format!("creating {}: {e}", parent.display()) };
+            return AgentResponse::Error {
+                message: format!("creating {}: {e}", parent.display()),
+            };
         }
     }
     if let Err(e) = std::fs::write(path, &bytes) {
-        return AgentResponse::Error { message: format!("writing {path}: {e}") };
+        return AgentResponse::Error {
+            message: format!("writing {path}: {e}"),
+        };
     }
     use std::os::unix::fs::PermissionsExt;
     let perms = std::fs::Permissions::from_mode(mode.unwrap_or(0o644));
     if let Err(e) = std::fs::set_permissions(path, perms) {
-        return AgentResponse::Error { message: format!("setting permissions on {path}: {e}") };
+        return AgentResponse::Error {
+            message: format!("setting permissions on {path}: {e}"),
+        };
     }
     AgentResponse::FileWritten
 }
@@ -490,20 +581,35 @@ fn put_file(path: &str, content_base64: &str, mode: Option<u32>) -> AgentRespons
 fn get_file(path: &str) -> AgentResponse {
     let metadata = match std::fs::metadata(path) {
         Ok(m) => m,
-        Err(e) => return AgentResponse::Error { message: format!("reading {path}: {e}") },
+        Err(e) => {
+            return AgentResponse::Error {
+                message: format!("reading {path}: {e}"),
+            };
+        }
     };
     if metadata.len() as usize > MAX_FILE_TRANSFER_BYTES {
         return AgentResponse::Error {
-            message: format!("{path} is {} bytes, exceeds the {}-byte transfer limit", metadata.len(), MAX_FILE_TRANSFER_BYTES),
+            message: format!(
+                "{path} is {} bytes, exceeds the {}-byte transfer limit",
+                metadata.len(),
+                MAX_FILE_TRANSFER_BYTES
+            ),
         };
     }
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
-        Err(e) => return AgentResponse::Error { message: format!("reading {path}: {e}") },
+        Err(e) => {
+            return AgentResponse::Error {
+                message: format!("reading {path}: {e}"),
+            };
+        }
     };
     use std::os::unix::fs::PermissionsExt;
     let mode = metadata.permissions().mode() & 0o777;
-    AgentResponse::FileContent { content_base64: B64.encode(&bytes), mode }
+    AgentResponse::FileContent {
+        content_base64: B64.encode(&bytes),
+        mode,
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -535,10 +641,17 @@ mod tests {
     fn get_file_round_trips_put_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.yaml");
-        put_file(path.to_str().unwrap(), &B64.encode(b"hello world"), Some(0o640));
+        put_file(
+            path.to_str().unwrap(),
+            &B64.encode(b"hello world"),
+            Some(0o640),
+        );
 
         match get_file(path.to_str().unwrap()) {
-            AgentResponse::FileContent { content_base64, mode } => {
+            AgentResponse::FileContent {
+                content_base64,
+                mode,
+            } => {
                 assert_eq!(B64.decode(&content_base64).unwrap(), b"hello world");
                 assert_eq!(mode, 0o640);
             }
@@ -568,9 +681,26 @@ mod tests {
         // just the calling thread's fds), so the agent's read on its own
         // end never sees EOF even after the client side closes — a
         // same-process test artifact, not a real cross-VM vsock bug.
-        let rc = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0, fds.as_mut_ptr()) };
-        assert_eq!(rc, 0, "socketpair failed: {}", std::io::Error::last_os_error());
-        unsafe { (std::fs::File::from_raw_fd(fds[0]), std::fs::File::from_raw_fd(fds[1])) }
+        let rc = unsafe {
+            libc::socketpair(
+                libc::AF_UNIX,
+                libc::SOCK_STREAM | libc::SOCK_CLOEXEC,
+                0,
+                fds.as_mut_ptr(),
+            )
+        };
+        assert_eq!(
+            rc,
+            0,
+            "socketpair failed: {}",
+            std::io::Error::last_os_error()
+        );
+        unsafe {
+            (
+                std::fs::File::from_raw_fd(fds[0]),
+                std::fs::File::from_raw_fd(fds[1]),
+            )
+        }
     }
 
     #[test]
@@ -593,7 +723,9 @@ mod tests {
         // Everything after that is raw PTY bytes — echo a marker and read
         // until we see it (the shell's own echo of our input, then its
         // command's output, both arrive on the same raw stream).
-        client_writer.write_all(b"echo PTY_ECHO_TEST_MARKER\n").unwrap();
+        client_writer
+            .write_all(b"echo PTY_ECHO_TEST_MARKER\n")
+            .unwrap();
         client_writer.flush().unwrap();
 
         unsafe {
@@ -624,7 +756,11 @@ mod tests {
                 Err(_) => break false,
             }
         };
-        assert!(marker_seen, "never saw the marker in PTY output; got: {:?}", String::from_utf8_lossy(&seen));
+        assert!(
+            marker_seen,
+            "never saw the marker in PTY output; got: {:?}",
+            String::from_utf8_lossy(&seen)
+        );
 
         // Both ends must close for the peer to see EOF — client_reader
         // holds a dup'd fd of the same socket, so dropping client_writer

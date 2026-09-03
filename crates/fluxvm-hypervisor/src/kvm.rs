@@ -155,7 +155,13 @@ impl KvmVm {
         }
     }
 
-    pub fn setup_long_mode(&mut self, mem: &mut GuestMemory, rip: u64, rsp: u64, cr3: u64) -> Result<()> {
+    pub fn setup_long_mode(
+        &mut self,
+        mem: &mut GuestMemory,
+        rip: u64,
+        rsp: u64,
+        cr3: u64,
+    ) -> Result<()> {
         const GDT: u64 = 0xB000;
         const TSS: u64 = 0xC000;
         mem.write_at(TSS, &[0u8; 128])?;
@@ -281,10 +287,9 @@ impl KvmVm {
     pub fn run_once(&mut self) -> Result<u32> {
         let r = unsafe { ffi::flux_ioctl(self.vcpu_fd, ffi::KVM_RUN, std::ptr::null_mut()) };
         if r < 0 {
-            return Err(FluxError::Hypervisor(format!(
-                "KVM_RUN errno {}",
-                unsafe { ffi::flux_errno() }
-            )));
+            return Err(FluxError::Hypervisor(format!("KVM_RUN errno {}", unsafe {
+                ffi::flux_errno()
+            })));
         }
         Ok(self.exit_reason())
     }

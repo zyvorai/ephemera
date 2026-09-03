@@ -51,7 +51,9 @@ pub enum AgentRequest {
     },
     /// Read `path` from inside the guest, returned base64-encoded in
     /// [`AgentResponse::FileContent`]. Replaces machinectl's `copy-from`.
-    GetFile { path: String },
+    GetFile {
+        path: String,
+    },
     /// Open an interactive PTY-backed shell. Unlike every other request,
     /// this is the *last* JSON line the agent reads on this connection —
     /// once it answers [`AgentResponse::ShellOpened`], the connection stops
@@ -67,8 +69,12 @@ pub enum AgentRequest {
     },
     Shutdown,
 }
-fn default_pty_cols() -> u16 { 80 }
-fn default_pty_rows() -> u16 { 24 }
+fn default_pty_cols() -> u16 {
+    80
+}
+fn default_pty_rows() -> u16 {
+    24
+}
 
 /// Every request the agent authored by `fluxvm-vsock-client` is wrapped in
 /// this envelope. `token` is checked against the file at [`TOKEN_FILE_PATH`]
@@ -164,14 +170,23 @@ mod tests {
 
     #[test]
     fn envelope_round_trips_with_flattened_request() {
-        let env = Envelope::new(Some("tok".into()), AgentRequest::Exec { command: "echo hi".into(), timeout_seconds: Some(5) });
+        let env = Envelope::new(
+            Some("tok".into()),
+            AgentRequest::Exec {
+                command: "echo hi".into(),
+                timeout_seconds: Some(5),
+            },
+        );
         let line = encode_line(&env).unwrap();
         assert!(line.contains("\"token\":\"tok\""));
         assert!(line.contains("\"op\":\"exec\""));
         let back: Envelope = decode_line(&line).unwrap();
         assert_eq!(back.token.as_deref(), Some("tok"));
         match back.request {
-            AgentRequest::Exec { command, timeout_seconds } => {
+            AgentRequest::Exec {
+                command,
+                timeout_seconds,
+            } => {
                 assert_eq!(command, "echo hi");
                 assert_eq!(timeout_seconds, Some(5));
             }
@@ -198,7 +213,11 @@ mod tests {
         assert!(line.contains("\"op\":\"put-file\""));
         let back: AgentRequest = decode_line(&line).unwrap();
         match back {
-            AgentRequest::PutFile { path, content_base64, mode } => {
+            AgentRequest::PutFile {
+                path,
+                content_base64,
+                mode,
+            } => {
                 assert_eq!(path, "/etc/myapp/config.yaml");
                 assert_eq!(content_base64, "aGVsbG8=");
                 assert_eq!(mode, Some(0o600));
@@ -206,15 +225,23 @@ mod tests {
             other => panic!("unexpected request: {other:?}"),
         }
 
-        let get = AgentRequest::GetFile { path: "/etc/myapp/config.yaml".into() };
+        let get = AgentRequest::GetFile {
+            path: "/etc/myapp/config.yaml".into(),
+        };
         let line = encode_line(&get).unwrap();
         assert!(line.contains("\"op\":\"get-file\""));
 
-        let resp = AgentResponse::FileContent { content_base64: "aGVsbG8=".into(), mode: 0o600 };
+        let resp = AgentResponse::FileContent {
+            content_base64: "aGVsbG8=".into(),
+            mode: 0o600,
+        };
         let line = encode_line(&resp).unwrap();
         assert!(line.contains("\"result\":\"file-content\""));
         let back: AgentResponse = decode_line(&line).unwrap();
-        assert!(matches!(back, AgentResponse::FileContent { mode: 0o600, .. }));
+        assert!(matches!(
+            back,
+            AgentResponse::FileContent { mode: 0o600, .. }
+        ));
     }
 
     #[test]
@@ -229,7 +256,10 @@ mod tests {
             other => panic!("unexpected request: {other:?}"),
         }
 
-        let explicit = AgentRequest::OpenShell { cols: 120, rows: 40 };
+        let explicit = AgentRequest::OpenShell {
+            cols: 120,
+            rows: 40,
+        };
         let line = encode_line(&explicit).unwrap();
         assert!(line.contains("\"cols\":120"));
         assert!(line.contains("\"rows\":40"));

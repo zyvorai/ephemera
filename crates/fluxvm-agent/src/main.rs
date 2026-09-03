@@ -6,7 +6,10 @@ use clap::{Parser, Subcommand};
 use std::time::Duration;
 
 #[derive(Parser)]
-#[command(name = "fluxvm-agent", about = "Distributed node-agent + fleet registry for multi-host Zyvor FluxVM")]
+#[command(
+    name = "fluxvm-agent",
+    about = "Distributed node-agent + fleet registry for multi-host Zyvor FluxVM"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -51,12 +54,19 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Central { listen } => {
             let app = fluxvm_agent::central::router();
-            let listener = tokio::net::TcpListener::bind(&listen).await
+            let listener = tokio::net::TcpListener::bind(&listen)
+                .await
                 .with_context(|| format!("binding {listen}"))?;
             tracing::info!(listen = %listen, "fleet registry listening");
             axum::serve(listener, app).await.context("serving")?;
         }
-        Command::Node { name, central, fluxvm_url, advertise_url, interval_secs } => {
+        Command::Node {
+            name,
+            central,
+            fluxvm_url,
+            advertise_url,
+            interval_secs,
+        } => {
             let advertise_url = advertise_url.unwrap_or_else(|| fluxvm_url.clone());
             fluxvm_agent::node::run(fluxvm_agent::node::NodeConfig {
                 name,

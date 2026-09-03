@@ -7,7 +7,7 @@
 //! existed; the other three are implemented here.
 
 use crate::clone_for_vm;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use fluxvm_core::{
     config::Config,
     model::{BackendKind, StorageBackend},
@@ -16,7 +16,9 @@ use fluxvm_core::{
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-fn short_id(id: Uuid) -> String { id.simple().to_string()[..8].to_string() }
+fn short_id(id: Uuid) -> String {
+    id.simple().to_string()[..8].to_string()
+}
 
 /// Result of provisioning a VM's disk: what to hand the VMM, plus whatever
 /// live state (an LV, a subprocess) `VmManager::delete` needs to tear down
@@ -66,17 +68,32 @@ pub async fn provision(
             if let Some(token) = agent_token {
                 crate::inject_guest_agent_token(disk_out, token).await?;
             }
-            Ok(ProvisionedDisk { disk: disk_out.to_path_buf(), lvm_lv: None, nbd_export: None, nbd_pid: None })
+            Ok(ProvisionedDisk {
+                disk: disk_out.to_path_buf(),
+                lvm_lv: None,
+                nbd_export: None,
+                nbd_pid: None,
+            })
         }
         StorageBackend::LvmThin => provision_lvm_thin(cfg, base, vmm, id, agent_token).await,
-        StorageBackend::Nbd => provision_nbd(cfg, base, vmm, workspace, disk_out, agent_token).await,
+        StorageBackend::Nbd => {
+            provision_nbd(cfg, base, vmm, workspace, disk_out, agent_token).await
+        }
         StorageBackend::CephRbd => provision_ceph_rbd(cfg, base, vmm, id, agent_token).await,
     }
 }
 
-async fn provision_lvm_thin(cfg: &Config, base: &Path, vmm: BackendKind, id: Uuid, agent_token: Option<&str>) -> Result<ProvisionedDisk> {
+async fn provision_lvm_thin(
+    cfg: &Config,
+    base: &Path,
+    vmm: BackendKind,
+    id: Uuid,
+    agent_token: Option<&str>,
+) -> Result<ProvisionedDisk> {
     if vmm == BackendKind::Firecracker && cfg.jailer.enabled {
-        bail!("storage=lvm-thin is not supported under the Firecracker jailer (its chroot/hardlink resource placement doesn't extend to shared block devices) — use direct Firecracker, QEMU, or Cloud Hypervisor");
+        bail!(
+            "storage=lvm-thin is not supported under the Firecracker jailer (its chroot/hardlink resource placement doesn't extend to shared block devices) — use direct Firecracker, QEMU, or Cloud Hypervisor"
+        );
     }
     let vg = base.parent().and_then(|p| p.file_name()).and_then(|s| s.to_str())
         .with_context(|| format!("storage=lvm-thin requires image to be a /dev/<vg>/<lv> path to an existing thin LV, got {}", base.display()))?;
@@ -84,20 +101,28 @@ async fn provision_lvm_thin(cfg: &Config, base: &Path, vmm: BackendKind, id: Uui
         .with_context(|| format!("storage=lvm-thin requires image to be a /dev/<vg>/<lv> path to an existing thin LV, got {}", base.display()))?;
     let snap = format!("eph-{}", short_id(id));
 
-    run_checked("lvcreate", &[
-        "--snapshot".into(), "--name".into(), snap.clone(),
-        // LVM sets a persistent "activation skip" flag on every new thin
-        // snapshot by default (a safety guard against accidentally
-        // mounting a filesystem with a duplicate UUID alongside its
-        // origin). Found on real hardware: without this, the immediately
-        // following `lvchange -ay` exits 0 but silently does nothing — no
-        // dm device is ever created, and the VM later fails to boot with
-        // "device does not exist". `--setactivationskip n` creates the
-        // snapshot without that flag in the first place, so plain `-ay`
-        // actually activates it.
-        "--setactivationskip".into(), "n".into(),
-        format!("{vg}/{base_lv}"),
-    ]).await.with_context(|| format!("creating LVM thin snapshot {vg}/{snap} from {vg}/{base_lv}"))?;
+    run_checked(
+        "lvcreate",
+        &[
+            "--snapshot".into(),
+            "--name".into(),
+            snap.clone(),
+            // LVM sets a persistent "activation skip" flag on every new thin
+            // snapshot by default (a safety guard against accidentally
+            // mounting a filesystem with a duplicate UUID alongside its
+            // origin). Found on real hardware: without this, the immediately
+            // following `lvchange -ay` exits 0 but silently does nothing — no
+            // dm device is ever created, and the VM later fails to boot with
+            // "device does not exist". `--setactivationskip n` creates the
+            // snapshot without that flag in the first place, so plain `-ay`
+            // actually activates it.
+            "--setactivationskip".into(),
+            "n".into(),
+            format!("{vg}/{base_lv}"),
+        ],
+    )
+    .await
+    .with_context(|| format!("creating LVM thin snapshot {vg}/{snap} from {vg}/{base_lv}"))?;
 
     if let Err(e) = run_checked("lvchange", &["-ay".into(), format!("{vg}/{snap}")]).await {
         let _ = run_checked("lvremove", &["-f".into(), format!("{vg}/{snap}")]).await;
@@ -126,7 +151,12 @@ async fn provision_lvm_thin(cfg: &Config, base: &Path, vmm: BackendKind, id: Uui
             return Err(e);
         }
     }
-    Ok(ProvisionedDisk { disk: dev.clone(), lvm_lv: Some(dev), nbd_export: None, nbd_pid: None })
+    Ok(ProvisionedDisk {
+        disk: dev.clone(),
+        lvm_lv: Some(dev),
+        nbd_export: None,
+        nbd_pid: None,
+    })
 }
 
 async fn wait_for_device_node(dev: &Path) -> Result<()> {
@@ -136,7 +166,10 @@ async fn wait_for_device_node(dev: &Path) -> Result<()> {
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    bail!("LVM activated {} but its device node never appeared within 5s (udev lag?)", dev.display())
+    bail!(
+        "LVM activated {} but its device node never appeared within 5s (udev lag?)",
+        dev.display()
+    )
 }
 
 /// Torn down only by `VmManager::delete` (see `VmRecord::lvm_lv`) — a
@@ -144,13 +177,23 @@ async fn wait_for_device_node(dev: &Path) -> Result<()> {
 /// keeps its qcow2/raw file across stop/start.
 pub async fn cleanup_lvm_lv(lv: &Path) -> Result<()> {
     let _ = run_checked("lvchange", &["-an".into(), lv.display().to_string()]).await;
-    run_checked("lvremove", &["-f".into(), lv.display().to_string()]).await
+    run_checked("lvremove", &["-f".into(), lv.display().to_string()])
+        .await
         .with_context(|| format!("removing LVM thin snapshot {}", lv.display()))
 }
 
-async fn provision_nbd(cfg: &Config, base: &Path, vmm: BackendKind, workspace: &Path, disk_out: &Path, agent_token: Option<&str>) -> Result<ProvisionedDisk> {
+async fn provision_nbd(
+    cfg: &Config,
+    base: &Path,
+    vmm: BackendKind,
+    workspace: &Path,
+    disk_out: &Path,
+    agent_token: Option<&str>,
+) -> Result<ProvisionedDisk> {
     if vmm != BackendKind::Qemu {
-        bail!("storage=nbd is only supported under the QEMU backend (QEMU has a native nbd: block client; Cloud Hypervisor and Firecracker have no equivalent)");
+        bail!(
+            "storage=nbd is only supported under the QEMU backend (QEMU has a native nbd: block client; Cloud Hypervisor and Firecracker have no equivalent)"
+        );
     }
     // Same disposable qcow2 overlay as StorageBackend::Default under QEMU —
     // it's just served over NBD instead of opened directly.
@@ -168,15 +211,27 @@ async fn provision_nbd(cfg: &Config, base: &Path, vmm: BackendKind, workspace: &
 
     let socket = workspace.join("nbd.sock");
     let pid_file = workspace.join("nbd.pid");
-    run_checked("qemu-nbd", &[
-        "--fork".into(), "--persistent".into(), "--format=qcow2".into(),
-        format!("--socket={}", socket.display()),
-        format!("--pid-file={}", pid_file.display()),
-        disk_out.display().to_string(),
-    ]).await.context("starting qemu-nbd export")?;
+    run_checked(
+        "qemu-nbd",
+        &[
+            "--fork".into(),
+            "--persistent".into(),
+            "--format=qcow2".into(),
+            format!("--socket={}", socket.display()),
+            format!("--pid-file={}", pid_file.display()),
+            disk_out.display().to_string(),
+        ],
+    )
+    .await
+    .context("starting qemu-nbd export")?;
 
     let pid = read_pid_file_retrying(&pid_file).await?;
-    Ok(ProvisionedDisk { disk: disk_out.to_path_buf(), lvm_lv: None, nbd_export: Some(socket), nbd_pid: Some(pid) })
+    Ok(ProvisionedDisk {
+        disk: disk_out.to_path_buf(),
+        lvm_lv: None,
+        nbd_export: Some(socket),
+        nbd_pid: Some(pid),
+    })
 }
 
 async fn read_pid_file_retrying(path: &Path) -> Result<u32> {
@@ -188,7 +243,10 @@ async fn read_pid_file_retrying(path: &Path) -> Result<u32> {
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    bail!("qemu-nbd did not write a pid file at {} within 3s", path.display())
+    bail!(
+        "qemu-nbd did not write a pid file at {} within 3s",
+        path.display()
+    )
 }
 
 /// Torn down only by `VmManager::delete` (see `VmRecord::nbd_pid`) — the
@@ -205,32 +263,55 @@ pub async fn cleanup_nbd(pid: u32) -> Result<()> {
 /// produced a real `eph-<id>` clone, QEMU booted a real guest straight off
 /// `rbd:rbd-nvme-prod/eph-<id>:id=admin:conf=...` to a login prompt, and
 /// `delete` reaped the clone (confirmed gone via `rbd ls`) with no leak.
-async fn provision_ceph_rbd(cfg: &Config, base: &Path, vmm: BackendKind, id: Uuid, agent_token: Option<&str>) -> Result<ProvisionedDisk> {
+async fn provision_ceph_rbd(
+    cfg: &Config,
+    base: &Path,
+    vmm: BackendKind,
+    id: Uuid,
+    agent_token: Option<&str>,
+) -> Result<ProvisionedDisk> {
     if vmm != BackendKind::Qemu {
-        bail!("storage=ceph-rbd is only implemented for the QEMU backend (QEMU has a native rbd: block driver when built against librbd; Cloud Hypervisor and Firecracker have no built-in equivalent)");
+        bail!(
+            "storage=ceph-rbd is only implemented for the QEMU backend (QEMU has a native rbd: block driver when built against librbd; Cloud Hypervisor and Firecracker have no built-in equivalent)"
+        );
     }
     if agent_token.is_some() {
-        bail!("storage=ceph-rbd does not support automatic guest-agent token injection (guestkit needs a local file or block device, not a rbd: URI) — bake the token into the base RBD image yourself, or use storage=default/lvm-thin/nbd with an agent-enabled VM");
+        bail!(
+            "storage=ceph-rbd does not support automatic guest-agent token injection (guestkit needs a local file or block device, not a rbd: URI) — bake the token into the base RBD image yourself, or use storage=default/lvm-thin/nbd with an agent-enabled VM"
+        );
     }
-    let base_ref = base.to_str().context("ceph-rbd image reference must be valid UTF-8 'pool/image'")?;
-    let (pool, image) = base_ref.split_once('/')
-        .with_context(|| format!("storage=ceph-rbd requires image to be a 'pool/image' reference, got {base_ref}"))?;
+    let base_ref = base
+        .to_str()
+        .context("ceph-rbd image reference must be valid UTF-8 'pool/image'")?;
+    let (pool, image) = base_ref.split_once('/').with_context(|| {
+        format!("storage=ceph-rbd requires image to be a 'pool/image' reference, got {base_ref}")
+    })?;
     let clone_name = format!("eph-{}", short_id(id));
 
-    let mut clone_args = vec!["clone".to_string(), format!("{pool}/{image}@fluxvm-base"), format!("{pool}/{clone_name}")];
+    let mut clone_args = vec![
+        "clone".to_string(),
+        format!("{pool}/{image}@fluxvm-base"),
+        format!("{pool}/{clone_name}"),
+    ];
     clone_args.push(format!("--id={}", cfg.storage.ceph_user));
     if let Some(conf) = &cfg.storage.ceph_conf {
         clone_args.push(format!("--conf={}", conf.display()));
     }
-    run_checked("rbd", &clone_args).await
-        .with_context(|| format!("cloning Ceph RBD image {pool}/{image}@fluxvm-base -> {pool}/{clone_name}"))?;
+    run_checked("rbd", &clone_args).await.with_context(|| {
+        format!("cloning Ceph RBD image {pool}/{image}@fluxvm-base -> {pool}/{clone_name}")
+    })?;
 
     let mut uri = format!("rbd:{pool}/{clone_name}");
     uri.push_str(&format!(":id={}", cfg.storage.ceph_user));
     if let Some(conf) = &cfg.storage.ceph_conf {
         uri.push_str(&format!(":conf={}", conf.display()));
     }
-    Ok(ProvisionedDisk { disk: PathBuf::from(uri), lvm_lv: None, nbd_export: None, nbd_pid: None })
+    Ok(ProvisionedDisk {
+        disk: PathBuf::from(uri),
+        lvm_lv: None,
+        nbd_export: None,
+        nbd_pid: None,
+    })
 }
 
 /// Verified end to end alongside `provision_ceph_rbd` — `delete` reaping a
@@ -242,7 +323,9 @@ pub async fn cleanup_ceph_rbd(cfg: &Config, pool_image: &str) -> Result<()> {
     if let Some(conf) = &cfg.storage.ceph_conf {
         args.push(format!("--conf={}", conf.display()));
     }
-    run_checked("rbd", &args).await.with_context(|| format!("removing Ceph RBD clone {pool_image}"))
+    run_checked("rbd", &args)
+        .await
+        .with_context(|| format!("removing Ceph RBD clone {pool_image}"))
 }
 
 /// Extracts `"pool/clone-name"` back out of a `rbd:pool/clone-name:id=...`
@@ -258,12 +341,27 @@ mod tests {
 
     #[test]
     fn disk_format_is_qcow2_only_for_default_storage_under_qemu() {
-        assert_eq!(disk_format(BackendKind::Qemu, StorageBackend::Default), "qcow2");
-        assert_eq!(disk_format(BackendKind::CloudHypervisor, StorageBackend::Default), "raw");
-        assert_eq!(disk_format(BackendKind::Firecracker, StorageBackend::Default), "raw");
-        assert_eq!(disk_format(BackendKind::Qemu, StorageBackend::LvmThin), "raw");
+        assert_eq!(
+            disk_format(BackendKind::Qemu, StorageBackend::Default),
+            "qcow2"
+        );
+        assert_eq!(
+            disk_format(BackendKind::CloudHypervisor, StorageBackend::Default),
+            "raw"
+        );
+        assert_eq!(
+            disk_format(BackendKind::Firecracker, StorageBackend::Default),
+            "raw"
+        );
+        assert_eq!(
+            disk_format(BackendKind::Qemu, StorageBackend::LvmThin),
+            "raw"
+        );
         assert_eq!(disk_format(BackendKind::Qemu, StorageBackend::Nbd), "raw");
-        assert_eq!(disk_format(BackendKind::Qemu, StorageBackend::CephRbd), "raw");
+        assert_eq!(
+            disk_format(BackendKind::Qemu, StorageBackend::CephRbd),
+            "raw"
+        );
     }
 
     #[test]
@@ -274,6 +372,9 @@ mod tests {
 
     #[test]
     fn ceph_rbd_ref_returns_none_for_a_non_rbd_path() {
-        assert_eq!(ceph_rbd_ref(&PathBuf::from("/var/lib/fluxvm/instances/x/root.raw")), None);
+        assert_eq!(
+            ceph_rbd_ref(&PathBuf::from("/var/lib/fluxvm/instances/x/root.raw")),
+            None
+        );
     }
 }

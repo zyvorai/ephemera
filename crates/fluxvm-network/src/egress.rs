@@ -29,7 +29,10 @@ pub fn decide(cfg: &SandboxConfig, host: &str) -> EgressDecision {
             reason: "no allowlist configured".into(),
         };
     }
-    let allowed = cfg.egress_allow_domains.iter().any(|d| host_matches(d, &host));
+    let allowed = cfg
+        .egress_allow_domains
+        .iter()
+        .any(|d| host_matches(d, &host));
     EgressDecision {
         allow: allowed,
         inject_authorization: if allowed { inject } else { None },

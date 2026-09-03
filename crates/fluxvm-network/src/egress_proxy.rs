@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Live L7 egress proxy: allowlist + credential injection for FluxVm sandboxes.
 
-use crate::egress::{decide, EgressDecision};
+use crate::egress::{EgressDecision, decide};
 use axum::{
+    Router,
     body::Body,
     extract::State,
-    http::{header, Request, StatusCode},
+    http::{Request, StatusCode, header},
     response::{IntoResponse, Response},
     routing::any,
-    Router,
 };
 use fluxvm_core::config::SandboxConfig;
 use std::net::SocketAddr;
@@ -31,7 +31,9 @@ pub async fn serve(listen: SocketAddr, cfg: SandboxConfig) -> anyhow::Result<()>
             .redirect(reqwest::redirect::Policy::none())
             .build()?,
     };
-    let app = Router::new().fallback(any(proxy)).with_state(Arc::new(state));
+    let app = Router::new()
+        .fallback(any(proxy))
+        .with_state(Arc::new(state));
     let listener = tokio::net::TcpListener::bind(listen).await?;
     info!(%listen, "FluxVM egress proxy listening");
     axum::serve(listener, app).await?;
@@ -54,10 +56,7 @@ async fn proxy(State(state): State<Arc<ProxyState>>, req: Request<Body>) -> Resp
 
     let method = req.method().clone();
     let uri = req.uri().clone();
-    let path_and_query = uri
-        .path_and_query()
-        .map(|pq| pq.as_str())
-        .unwrap_or("/");
+    let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
 
     // Absolute-form URI for forward proxy, or reconstruct from Host.
     let url = if uri.scheme().is_some() {
@@ -86,8 +85,8 @@ async fn proxy(State(state): State<Arc<ProxyState>>, req: Request<Body>) -> Resp
 
     match builder.send().await {
         Ok(upstream) => {
-            let status = StatusCode::from_u16(upstream.status().as_u16())
-                .unwrap_or(StatusCode::BAD_GATEWAY);
+            let status =
+                StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let mut response = Response::builder().status(status);
             for (k, v) in upstream.headers().iter() {
                 response = response.header(k, v);

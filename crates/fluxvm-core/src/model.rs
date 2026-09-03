@@ -63,7 +63,9 @@ pub enum NetworkSpec {
 }
 
 impl Default for NetworkSpec {
-    fn default() -> Self { Self::User { forwards: vec![] } }
+    fn default() -> Self {
+        Self::User { forwards: vec![] }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,7 +75,9 @@ pub struct PortForward {
     #[serde(default = "default_tcp")]
     pub protocol: String,
 }
-fn default_tcp() -> String { "tcp".into() }
+fn default_tcp() -> String {
+    "tcp".into()
+}
 
 /// Where and how a VM's writable disk is actually provisioned, independent
 /// of which VMM backend boots it. `Default` (the empty/unset request field)
@@ -130,10 +134,18 @@ pub struct AgentSpec {
     #[serde(default)]
     pub token: Option<String>,
 }
-fn default_agent_port() -> u32 { 17777 }
+fn default_agent_port() -> u32 {
+    17777
+}
 
 impl Default for AgentSpec {
-    fn default() -> Self { Self { enabled: false, port: default_agent_port(), token: None } }
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: default_agent_port(),
+            token: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -247,8 +259,12 @@ pub struct CreateVmRequest {
     #[serde(default)]
     pub shared_folders: Vec<SharedFolder>,
 }
-fn default_vcpus() -> u8 { 2 }
-fn default_memory() -> u64 { 2048 }
+fn default_vcpus() -> u8 {
+    2
+}
+fn default_memory() -> u64 {
+    2048
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

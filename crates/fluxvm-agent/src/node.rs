@@ -53,8 +53,12 @@ pub async fn run(cfg: NodeConfig) {
 }
 
 async fn beat(http: &reqwest::Client, cfg: &NodeConfig) -> Result<()> {
-    let vm_count = local_vm_count(http, &cfg.fluxvm_url).await.context("counting local VMs")?;
-    let vcpus_total = std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(1);
+    let vm_count = local_vm_count(http, &cfg.fluxvm_url)
+        .await
+        .context("counting local VMs")?;
+    let vcpus_total = std::thread::available_parallelism()
+        .map(|n| n.get() as u32)
+        .unwrap_or(1);
     let memory_mib_total = total_memory_mib().unwrap_or(0);
 
     let body = json!({
@@ -64,7 +68,11 @@ async fn beat(http: &reqwest::Client, cfg: &NodeConfig) -> Result<()> {
         "memory_mib_total": memory_mib_total,
         "vm_count": vm_count,
     });
-    let resp = http.post(format!("{}/fleet/register", cfg.central_url)).json(&body).send().await
+    let resp = http
+        .post(format!("{}/fleet/register", cfg.central_url))
+        .json(&body)
+        .send()
+        .await
         .context("sending heartbeat")?;
     if !resp.status().is_success() {
         anyhow::bail!("central rejected heartbeat: {}", resp.status());
@@ -73,9 +81,17 @@ async fn beat(http: &reqwest::Client, cfg: &NodeConfig) -> Result<()> {
 }
 
 async fn local_vm_count(http: &reqwest::Client, fluxvm_url: &str) -> Result<usize> {
-    let resp = http.get(format!("{fluxvm_url}/v1/vms")).send().await.context("GET /v1/vms")?;
+    let resp = http
+        .get(format!("{fluxvm_url}/v1/vms"))
+        .send()
+        .await
+        .context("GET /v1/vms")?;
     let body: serde_json::Value = resp.json().await.context("parsing /v1/vms response")?;
-    Ok(body.get("items").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0))
+    Ok(body
+        .get("items")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0))
 }
 
 /// Real total RAM off `/proc/meminfo` (`MemTotal:` is always the first

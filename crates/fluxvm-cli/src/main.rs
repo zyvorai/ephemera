@@ -16,9 +16,13 @@ use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
 #[derive(Parser)]
-#[command(name="fluxvm", version, about="Zyvor FluxVM: disposable compute engine for QEMU, Cloud Hypervisor, Firecracker, and FluxVM hypervisor")]
+#[command(
+    name = "fluxvm",
+    version,
+    about = "Zyvor FluxVM: disposable compute engine for QEMU, Cloud Hypervisor, Firecracker, and FluxVM hypervisor"
+)]
 struct Cli {
-    #[arg(long, env="FLUXVM_CONFIG")]
+    #[arg(long, env = "FLUXVM_CONFIG")]
     config: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
@@ -27,15 +31,28 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Serve,
-    Create { #[arg(long)] spec: PathBuf },
+    Create {
+        #[arg(long)]
+        spec: PathBuf,
+    },
     List,
-    Get { id: Uuid },
+    Get {
+        id: Uuid,
+    },
     /// Relaunch a Stopped VM from its existing disk (skips image
     /// clone/cloud-init reseed — see VmManager::start).
-    Start { id: Uuid },
-    Stop { id: Uuid },
-    Pause { id: Uuid },
-    Resume { id: Uuid },
+    Start {
+        id: Uuid,
+    },
+    Stop {
+        id: Uuid,
+    },
+    Pause {
+        id: Uuid,
+    },
+    Resume {
+        id: Uuid,
+    },
     /// Run a command inside the guest over vsock (requires agent.enabled in the VM spec).
     Exec {
         id: Uuid,
@@ -44,8 +61,13 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         command: Vec<String>,
     },
-    Delete { id: Uuid },
-    BuildImage { #[arg(long)] spec: PathBuf },
+    Delete {
+        id: Uuid,
+    },
+    BuildImage {
+        #[arg(long)]
+        spec: PathBuf,
+    },
     /// Manage warm VM pools — pre-booted, paused VMs handed out on claim in
     /// roughly resume time instead of full create time.
     Pool {
@@ -97,9 +119,14 @@ enum CatalogCommand {
 
 #[derive(Subcommand)]
 enum PoolCommand {
-    Create { #[arg(long)] spec: PathBuf },
+    Create {
+        #[arg(long)]
+        spec: PathBuf,
+    },
     List,
-    Get { name: String },
+    Get {
+        name: String,
+    },
     /// Claim one ready VM from the pool. Replenishment is fired off as a
     /// background task so this command stays fast, which means it only
     /// reliably completes if `fluxvm serve` is already running against
@@ -114,16 +141,23 @@ enum PoolCommand {
         #[arg(long)]
         ttl_seconds: Option<u64>,
     },
-    Delete { name: String },
+    Delete {
+        name: String,
+    },
 }
 
-async fn manager(cfg: Config) -> Result<Arc<VmManager>> { VmManager::new(cfg) }
+async fn manager(cfg: Config) -> Result<Arc<VmManager>> {
+    VmManager::new(cfg)
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt().with_env_filter(
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| "fluxvm=info,tower_http=info".into())
-    ).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "fluxvm=info,tower_http=info".into()),
+        )
+        .init();
     let cli = Cli::parse();
     let cfg = Config::load(cli.config.as_deref())?;
     let m = manager(cfg.clone()).await?;
@@ -154,19 +188,29 @@ async fn main() -> Result<()> {
         Command::Start { id } => println!("{}", serde_json::to_string_pretty(&m.start(id).await?)?),
         Command::Stop { id } => println!("{}", serde_json::to_string_pretty(&m.stop(id).await?)?),
         Command::Pause { id } => println!("{}", serde_json::to_string_pretty(&m.pause(id).await?)?),
-        Command::Resume { id } => println!("{}", serde_json::to_string_pretty(&m.resume(id).await?)?),
-        Command::Exec { id, timeout_seconds, command } => {
+        Command::Resume { id } => {
+            println!("{}", serde_json::to_string_pretty(&m.resume(id).await?)?)
+        }
+        Command::Exec {
+            id,
+            timeout_seconds,
+            command,
+        } => {
             let response = m.exec(id, command.join(" "), timeout_seconds).await?;
             println!("{}", serde_json::to_string_pretty(&response)?);
         }
         Command::Delete { id } => m.delete(id).await?,
         Command::BuildImage { spec } => {
             let req: BuildImageRequest = serde_json::from_slice(&std::fs::read(spec)?)?;
-            println!("{}", serde_json::to_string_pretty(&image::build_image(&cfg, &req).await?)?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&image::build_image(&cfg, &req).await?)?
+            );
         }
         Command::Pool { command } => match command {
             PoolCommand::Create { spec } => {
-                let spec: fluxvm_core::model::PoolSpec = serde_json::from_slice(&std::fs::read(spec)?)?;
+                let spec: fluxvm_core::model::PoolSpec =
+                    serde_json::from_slice(&std::fs::read(spec)?)?;
                 let name = spec.name.clone();
                 m.create_pool(spec).await?;
                 // This CLI process exits right after printing — wait for a
@@ -175,24 +219,56 @@ async fn main() -> Result<()> {
                 // get killed mid-flight along with this process (see
                 // VmManager::backfill_pool_sync's doc comment).
                 m.backfill_pool_sync(&name).await?;
-                println!("{}", serde_json::to_string_pretty(&m.get_pool(&name).await?)?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&m.get_pool(&name).await?)?
+                );
             }
-            PoolCommand::List => println!("{}", serde_json::to_string_pretty(&m.list_pools().await)?),
-            PoolCommand::Get { name } => println!("{}", serde_json::to_string_pretty(&m.get_pool(&name).await?)?),
-            PoolCommand::Claim { name, vm_name, ttl_seconds } => {
-                let overrides = ClaimOverrides { name: vm_name, ttl_seconds };
-                println!("{}", serde_json::to_string_pretty(&m.claim_from_pool(&name, overrides).await?)?);
+            PoolCommand::List => {
+                println!("{}", serde_json::to_string_pretty(&m.list_pools().await)?)
+            }
+            PoolCommand::Get { name } => println!(
+                "{}",
+                serde_json::to_string_pretty(&m.get_pool(&name).await?)?
+            ),
+            PoolCommand::Claim {
+                name,
+                vm_name,
+                ttl_seconds,
+            } => {
+                let overrides = ClaimOverrides {
+                    name: vm_name,
+                    ttl_seconds,
+                };
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&m.claim_from_pool(&name, overrides).await?)?
+                );
             }
             PoolCommand::Delete { name } => m.delete_pool(&name).await?,
         },
         Command::Catalog { command } => match command {
             CatalogCommand::Keygen => {
                 let (private_b64, public_b64) = image::catalog::generate_keypair();
-                println!("private key (keep secret, use with `catalog sign --key`):\n  {private_b64}");
+                println!(
+                    "private key (keep secret, use with `catalog sign --key`):\n  {private_b64}"
+                );
                 println!("public key (put in config.catalog.trusted_signers):\n  {public_b64}");
             }
-            CatalogCommand::Sign { key, name, source, sha256, format, distro, version, arch, catalog_file } => {
-                let entry = image::catalog::sign_entry(&key, name, source, sha256, format, distro, version, arch)?;
+            CatalogCommand::Sign {
+                key,
+                name,
+                source,
+                sha256,
+                format,
+                distro,
+                version,
+                arch,
+                catalog_file,
+            } => {
+                let entry = image::catalog::sign_entry(
+                    &key, name, source, sha256, format, distro, version, arch,
+                )?;
                 match catalog_file {
                     Some(path) => {
                         let mut entries: Vec<image::catalog::CatalogEntry> = if path.exists() {

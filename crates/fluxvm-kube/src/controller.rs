@@ -5,13 +5,13 @@ use crate::crd::{DisposableVm, DisposableVmStatus};
 use crate::fluxvm_client::FluxVMClient;
 use futures::StreamExt;
 use kube::{
+    Client, ResourceExt,
     api::{Api, Patch, PatchParams},
     runtime::{
         controller::{Action, Controller},
-        finalizer::{finalizer, Event as FinalizerEvent},
+        finalizer::{Event as FinalizerEvent, finalizer},
         watcher,
     },
-    Client, ResourceExt,
 };
 use std::{sync::Arc, time::Duration};
 
@@ -60,7 +60,11 @@ pub enum Error {
 /// README's "Kubernetes CRD/operator" section).
 pub async fn run(client: Client, fluxvm: FluxVMClient, node_name: String) {
     let api: Api<DisposableVm> = Api::all(client.clone());
-    let ctx = Arc::new(Context { client, fluxvm, node_name });
+    let ctx = Arc::new(Context {
+        client,
+        fluxvm,
+        node_name,
+    });
     tracing::info!(node = %ctx.node_name, "starting DisposableVm controller");
     Controller::new(api, watcher::Config::default())
         .run(reconcile, error_policy, ctx)
@@ -99,25 +103,49 @@ fn error_policy(_obj: Arc<DisposableVm>, err: &Error, _ctx: Arc<Context>) -> Act
     Action::requeue(ERROR_REQUEUE)
 }
 
-async fn apply(obj: &DisposableVm, api: &Api<DisposableVm>, ctx: &Context) -> Result<Action, ReconcileError> {
+async fn apply(
+    obj: &DisposableVm,
+    api: &Api<DisposableVm>,
+    ctx: &Context,
+) -> Result<Action, ReconcileError> {
     let name = obj.name_any();
-    let already_has_vm = obj.status.as_ref().and_then(|s| s.vm_id.as_deref()).map(str::to_string);
+    let already_has_vm = obj
+        .status
+        .as_ref()
+        .and_then(|s| s.vm_id.as_deref())
+        .map(str::to_string);
 
     let Some(vm_id) = already_has_vm else {
         // First time seeing this CR (or a previous create attempt failed
         // without ever recording a vm_id) — create it.
         return match ctx.fluxvm.create_vm(&obj.spec).await {
             Ok(record) => {
-                let vm_id = record.get("id").and_then(|v| v.as_str()).map(str::to_string);
-                patch_status(api, &name, DisposableVmStatus { phase: "Running".into(), vm_id, error: None }).await?;
+                let vm_id = record
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                patch_status(
+                    api,
+                    &name,
+                    DisposableVmStatus {
+                        phase: "Running".into(),
+                        vm_id,
+                        error: None,
+                    },
+                )
+                .await?;
                 Ok(Action::requeue(STEADY_STATE_REQUEUE))
             }
             Err(e) => {
-                patch_status(api, &name, DisposableVmStatus {
-                    phase: "Failed".into(),
-                    vm_id: None,
-                    error: Some(format!("{e:#}")),
-                })
+                patch_status(
+                    api,
+                    &name,
+                    DisposableVmStatus {
+                        phase: "Failed".into(),
+                        vm_id: None,
+                        error: Some(format!("{e:#}")),
+                    },
+                )
                 .await?;
                 // Real failures (bad image path, policy rejection, ...)
                 // won't fix themselves by retrying immediately — still
@@ -170,8 +198,13 @@ async fn cleanup(obj: &DisposableVm, ctx: &Context) -> Result<Action, ReconcileE
     Ok(Action::await_change())
 }
 
-async fn patch_status(api: &Api<DisposableVm>, name: &str, status: DisposableVmStatus) -> Result<(), kube::Error> {
+async fn patch_status(
+    api: &Api<DisposableVm>,
+    name: &str,
+    status: DisposableVmStatus,
+) -> Result<(), kube::Error> {
     let patch = serde_json::json!({ "status": status });
-    api.patch_status(name, &PatchParams::default(), &Patch::Merge(patch)).await?;
+    api.patch_status(name, &PatchParams::default(), &Patch::Merge(patch))
+        .await?;
     Ok(())
 }

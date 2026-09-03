@@ -1,7 +1,10 @@
 // Copyright 2026 Zyvor
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{config::Config, model::{BackendKind, CreateVmRequest, VmRecord}};
+use crate::{
+    config::Config,
+    model::{BackendKind, CreateVmRequest, VmRecord},
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
@@ -94,10 +97,17 @@ pub struct LaunchResult {
 #[async_trait]
 pub trait VmBackend: Send + Sync {
     fn kind(&self) -> BackendKind;
-    async fn launch(&self, cfg: &Config, req: &CreateVmRequest, ctx: &LaunchContext) -> Result<LaunchResult>;
+    async fn launch(
+        &self,
+        cfg: &Config,
+        req: &CreateVmRequest,
+        ctx: &LaunchContext,
+    ) -> Result<LaunchResult>;
     async fn pause(&self, cfg: &Config, vm: &VmRecord) -> Result<()>;
     async fn resume(&self, cfg: &Config, vm: &VmRecord) -> Result<()>;
     async fn graceful_shutdown(&self, cfg: &Config, vm: &VmRecord) -> Result<()>;
 }
 
-pub fn path_arg(p: &Path) -> String { p.display().to_string() }
+pub fn path_arg(p: &Path) -> String {
+    p.display().to_string()
+}

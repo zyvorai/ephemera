@@ -154,8 +154,7 @@ impl VirtualMachine {
                     break;
                 }
                 ffi::KVM_EXIT_FAIL_ENTRY => {
-                    let reason =
-                        unsafe { std::ptr::read_unaligned(kvm.run.add(32) as *const u64) };
+                    let reason = unsafe { std::ptr::read_unaligned(kvm.run.add(32) as *const u64) };
                     return Err(FluxError::Hypervisor(format!(
                         "KVM_EXIT_FAIL_ENTRY reason={reason:#x}"
                     )));

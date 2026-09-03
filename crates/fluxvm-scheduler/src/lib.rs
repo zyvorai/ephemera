@@ -1,12 +1,15 @@
 // Copyright 2026 Zyvor
 // SPDX-License-Identifier: Apache-2.0
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
 use fluxvm_core::{
     backend::{LaunchContext, VmBackend},
     config::Config,
-    model::{BackendKind, ClaimOverrides, CloudInitSpec, CreateVmRequest, NetworkSpec, PoolRecord, PoolSpec, StorageBackend, VmRecord, VmStatus},
+    model::{
+        BackendKind, ClaimOverrides, CloudInitSpec, CreateVmRequest, NetworkSpec, PoolRecord,
+        PoolSpec, StorageBackend, VmRecord, VmStatus,
+    },
     process,
 };
 use fluxvm_guest_protocol::AgentRequest;
@@ -38,7 +41,9 @@ pub fn backend(kind: BackendKind) -> Result<Box<dyn VmBackend>> {
         BackendKind::CloudHypervisor => Box::new(fluxvm_cloud_hypervisor::CloudHypervisorBackend),
         BackendKind::Firecracker => Box::new(fluxvm_firecracker::FirecrackerBackend),
         BackendKind::FluxVm => Box::new(fluxvm_hypervisor::FluxVmBackend),
-        BackendKind::Auto => bail!("VM has an unresolved BackendKind::Auto — this is a bug, backend selection must happen before dispatch"),
+        BackendKind::Auto => bail!(
+            "VM has an unresolved BackendKind::Auto — this is a bug, backend selection must happen before dispatch"
+        ),
     })
 }
 
@@ -54,7 +59,8 @@ pub fn resolve_backend(req: &CreateVmRequest, cfg: &Config) -> BackendKind {
         return req.backend;
     }
     let firecracker_ok = req.kernel.is_some() || cfg.firecracker_kernel.is_some();
-    let cloud_hypervisor_ok = req.kernel.is_some() || req.firmware.is_some() || cfg.cloud_hypervisor_firmware.is_some();
+    let cloud_hypervisor_ok =
+        req.kernel.is_some() || req.firmware.is_some() || cfg.cloud_hypervisor_firmware.is_some();
     if firecracker_ok {
         BackendKind::Firecracker
     } else if cloud_hypervisor_ok {
@@ -70,12 +76,18 @@ fn validate_policy(req: &CreateVmRequest, cfg: &Config) -> Result<()> {
     let p = &cfg.policy;
     if let Some(max) = p.max_vcpus {
         if req.vcpus > max {
-            bail!("request vcpus ({}) exceeds policy max_vcpus ({max})", req.vcpus);
+            bail!(
+                "request vcpus ({}) exceeds policy max_vcpus ({max})",
+                req.vcpus
+            );
         }
     }
     if let Some(max) = p.max_memory_mib {
         if req.memory_mib > max {
-            bail!("request memory_mib ({}) exceeds policy max_memory_mib ({max})", req.memory_mib);
+            bail!(
+                "request memory_mib ({}) exceeds policy max_memory_mib ({max})",
+                req.memory_mib
+            );
         }
     }
     if let Some(max) = p.max_disk_gib {
@@ -87,19 +99,31 @@ fn validate_policy(req: &CreateVmRequest, cfg: &Config) -> Result<()> {
     }
     if let Some(max) = p.max_ttl_seconds {
         match req.ttl_seconds {
-            Some(ttl) if ttl > max => bail!("request ttl_seconds ({ttl}) exceeds policy max_ttl_seconds ({max})"),
-            None => bail!("policy requires ttl_seconds to be set (max_ttl_seconds={max}); unbounded VMs are not allowed"),
+            Some(ttl) if ttl > max => {
+                bail!("request ttl_seconds ({ttl}) exceeds policy max_ttl_seconds ({max})")
+            }
+            None => bail!(
+                "policy requires ttl_seconds to be set (max_ttl_seconds={max}); unbounded VMs are not allowed"
+            ),
             _ => {}
         }
     }
     if let Some(allowed) = &p.allowed_backends {
         if !allowed.contains(&req.backend) {
-            bail!("backend {:?} is not permitted by policy allowed_backends {:?}", req.backend, allowed);
+            bail!(
+                "backend {:?} is not permitted by policy allowed_backends {:?}",
+                req.backend,
+                allowed
+            );
         }
     }
     if let Some(dirs) = &p.allowed_image_dirs {
         if !dirs.iter().any(|d| req.image.starts_with(d)) {
-            bail!("image {} is not under any policy allowed_image_dirs {:?}", req.image.display(), dirs);
+            bail!(
+                "image {} is not under any policy allowed_image_dirs {:?}",
+                req.image.display(),
+                dirs
+            );
         }
     }
     Ok(())
@@ -165,7 +189,12 @@ impl VmManager {
     }
 
     /// Register a new image catalog entry — see `fluxvm_image::catalog::add_entry`.
-    pub async fn add_catalog_entry(&self, name: String, source: String, format: String) -> Result<fluxvm_image::catalog::CatalogEntry> {
+    pub async fn add_catalog_entry(
+        &self,
+        name: String,
+        source: String,
+        format: String,
+    ) -> Result<fluxvm_image::catalog::CatalogEntry> {
         let _guard = self.catalog_lock.lock().await;
         fluxvm_image::catalog::add_entry(&self.cfg, name, source, format).await
     }
@@ -177,13 +206,21 @@ impl VmManager {
     }
 
     /// Rename an image catalog entry — see `fluxvm_image::catalog::rename_entry`.
-    pub async fn rename_catalog_entry(&self, name: &str, new_name: &str) -> Result<fluxvm_image::catalog::CatalogEntry> {
+    pub async fn rename_catalog_entry(
+        &self,
+        name: &str,
+        new_name: &str,
+    ) -> Result<fluxvm_image::catalog::CatalogEntry> {
         let _guard = self.catalog_lock.lock().await;
         fluxvm_image::catalog::rename_entry(&self.cfg, name, new_name)
     }
 
     /// Clone an image catalog entry under a new name — see `fluxvm_image::catalog::clone_entry`.
-    pub async fn clone_catalog_entry(&self, name: &str, target_name: &str) -> Result<fluxvm_image::catalog::CatalogEntry> {
+    pub async fn clone_catalog_entry(
+        &self,
+        name: &str,
+        target_name: &str,
+    ) -> Result<fluxvm_image::catalog::CatalogEntry> {
         let _guard = self.catalog_lock.lock().await;
         fluxvm_image::catalog::clone_entry(&self.cfg, name, target_name)
     }
@@ -198,7 +235,11 @@ impl VmManager {
     }
 
     /// Toggle a catalog entry's read-only flag — see `fluxvm_image::catalog::set_read_only`.
-    pub async fn set_catalog_read_only(&self, name: &str, read_only: bool) -> Result<fluxvm_image::catalog::CatalogEntry> {
+    pub async fn set_catalog_read_only(
+        &self,
+        name: &str,
+        read_only: bool,
+    ) -> Result<fluxvm_image::catalog::CatalogEntry> {
         let _guard = self.catalog_lock.lock().await;
         fluxvm_image::catalog::set_read_only(&self.cfg, name, read_only)
     }
@@ -218,7 +259,9 @@ impl VmManager {
     fn attach_cgroup(id: Uuid, pid: u32, record: &mut VmRecord) {
         match fluxvm_cgroup::CgroupManager::create_and_migrate(&id.to_string(), pid) {
             Ok(mgr) => record.cgroup_path = Some(mgr.path().to_path_buf()),
-            Err(e) => tracing::warn!(vm = %id, error = %e, "failed to create cgroup for VM — resource control/metrics unavailable for it"),
+            Err(e) => {
+                tracing::warn!(vm = %id, error = %e, "failed to create cgroup for VM — resource control/metrics unavailable for it")
+            }
         }
     }
 
@@ -247,18 +290,26 @@ impl VmManager {
 
     fn cgroup_manager(&self, vm: &VmRecord) -> Result<fluxvm_cgroup::CgroupManager> {
         let path = vm.cgroup_path.clone().with_context(|| {
-            format!("VM {} has no cgroup (not running, or cgroup setup failed at launch)", vm.id)
+            format!(
+                "VM {} has no cgroup (not running, or cgroup setup failed at launch)",
+                vm.id
+            )
         })?;
         Ok(fluxvm_cgroup::CgroupManager::from_path(path)?)
     }
 
     /// Apply a partial set of cgroup v2 resource-control settings — only
     /// the fields set in `patch` are touched.
-    pub async fn set_resources(&self, id: Uuid, patch: fluxvm_core::model::ResourcePatch) -> Result<()> {
+    pub async fn set_resources(
+        &self,
+        id: Uuid,
+        patch: fluxvm_core::model::ResourcePatch,
+    ) -> Result<()> {
         let vm = self.get(id).await?;
         let mgr = self.cgroup_manager(&vm)?;
         if let Some(percent) = patch.cpu_quota_percent {
-            mgr.cpu().set_max(&fluxvm_cgroup::CpuMax::from_percent(percent as u64))?;
+            mgr.cpu()
+                .set_max(&fluxvm_cgroup::CpuMax::from_percent(percent as u64))?;
         }
         if let Some(bytes) = patch.memory_max_bytes {
             mgr.memory().set_max(bytes)?;
@@ -303,25 +354,48 @@ impl VmManager {
         let mgr = self.cgroup_manager(&vm)?;
 
         let cpu_stat = mgr.cpu().get_stat()?;
-        let num_cpus = mgr.cpuset().get_cpus_effective().ok().filter(|c| !c.is_empty()).map(|c| c.len() as u64).unwrap_or_else(|| {
-            std::thread::available_parallelism().map(|n| n.get() as u64).unwrap_or(1)
-        });
+        let num_cpus = mgr
+            .cpuset()
+            .get_cpus_effective()
+            .ok()
+            .filter(|c| !c.is_empty())
+            .map(|c| c.len() as u64)
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map(|n| n.get() as u64)
+                    .unwrap_or(1)
+            });
         let uptime_secs = std::fs::read_to_string("/proc/uptime")
             .ok()
             .and_then(|s| s.split_whitespace().next().map(str::to_string))
             .and_then(|s| s.parse::<f64>().ok())
             .unwrap_or(1.0);
         let total_usec = (uptime_secs * 1_000_000.0) as u64 * num_cpus;
-        let cpu_usage_percent =
-            if total_usec == 0 { 0.0 } else { (cpu_stat.usage_usec as f64 / total_usec as f64 * 100.0).clamp(0.0, 100.0 * num_cpus as f64) };
+        let cpu_usage_percent = if total_usec == 0 {
+            0.0
+        } else {
+            (cpu_stat.usage_usec as f64 / total_usec as f64 * 100.0)
+                .clamp(0.0, 100.0 * num_cpus as f64)
+        };
 
         let memory_usage_bytes = mgr.memory().get_current()?;
 
-        let (disk_read_bytes, disk_write_bytes) = mgr.io().get_stat().map(|stats| {
-            stats.iter().fold((0u64, 0u64), |(r, w), s| (r + s.rbytes, w + s.wbytes))
-        }).unwrap_or((0, 0));
+        let (disk_read_bytes, disk_write_bytes) = mgr
+            .io()
+            .get_stat()
+            .map(|stats| {
+                stats
+                    .iter()
+                    .fold((0u64, 0u64), |(r, w), s| (r + s.rbytes, w + s.wbytes))
+            })
+            .unwrap_or((0, 0));
 
-        Ok(fluxvm_core::model::VmMetrics { cpu_usage_percent, memory_usage_bytes, disk_read_bytes, disk_write_bytes })
+        Ok(fluxvm_core::model::VmMetrics {
+            cpu_usage_percent,
+            memory_usage_bytes,
+            disk_read_bytes,
+            disk_write_bytes,
+        })
     }
 
     /// PSI pressure stats for the VM's cgroup.
@@ -348,7 +422,9 @@ impl VmManager {
         // Resolved before policy so allowed_image_dirs governs the actual
         // downloaded/verified file a catalog alias points to, not the
         // alias string itself.
-        req.image = fluxvm_image::catalog::resolve(&self.cfg, &req.image).await.context("resolving image from catalog")?;
+        req.image = fluxvm_image::catalog::resolve(&self.cfg, &req.image)
+            .await
+            .context("resolving image from catalog")?;
         validate_policy(&req, &self.cfg)?;
         // Every storage backend except CephRbd points `image` at a real
         // filesystem entry (a file for Default/Nbd, a block device for
@@ -360,16 +436,25 @@ impl VmManager {
         let id = Uuid::new_v4();
         let workspace = self.cfg.state_dir.join("instances").join(id.to_string());
         fs::create_dir_all(&workspace)?;
-        let disk = workspace.join(if req.backend == BackendKind::Qemu { "root.qcow2" } else { "root.raw" });
+        let disk = workspace.join(if req.backend == BackendKind::Qemu {
+            "root.qcow2"
+        } else {
+            "root.raw"
+        });
         let log_path = workspace.join("console.log");
-        let expires_at = req.ttl_seconds.map(|s| Utc::now() + Duration::seconds(s as i64));
+        let expires_at = req
+            .ttl_seconds
+            .map(|s| Utc::now() + Duration::seconds(s as i64));
         let needs_cid = req.agent.as_ref().is_some_and(|a| a.enabled);
         // Every agent-enabled VM gets a token whether the caller supplied
         // one or not — generated here (before `placeholder` is built) so
         // the persisted record always reflects the token actually burned
         // into the guest's disk below, never a stale/absent one.
         if needs_cid {
-            let agent = req.agent.as_mut().expect("needs_cid implies req.agent is Some");
+            let agent = req
+                .agent
+                .as_mut()
+                .expect("needs_cid implies req.agent is Some");
             if agent.token.is_none() {
                 agent.token = Some(Uuid::new_v4().to_string());
             }
@@ -406,14 +491,27 @@ impl VmManager {
         // operation in the store — see fluxvm-storage::Store::insert_with_cid
         // for why a separate "list, then insert" pair isn't safe across
         // concurrent `fluxvm` processes.
-        let mut record = self.store.insert_with_cid(placeholder, needs_cid, FIRST_GUEST_CID).await?;
+        let mut record = self
+            .store
+            .insert_with_cid(placeholder, needs_cid, FIRST_GUEST_CID)
+            .await?;
         let guest_cid = record.guest_cid;
 
         let result: Result<()> = async {
             let agent_token = req.agent.as_ref().and_then(|a| a.token.as_deref());
             let provisioned = fluxvm_image::storage::provision(
-                &self.cfg, &req.image, req.backend, req.storage, &workspace, &disk, req.disk_size_gib, id, agent_token,
-            ).await.context("provisioning VM disk")?;
+                &self.cfg,
+                &req.image,
+                req.backend,
+                req.storage,
+                &workspace,
+                &disk,
+                req.disk_size_gib,
+                id,
+                agent_token,
+            )
+            .await
+            .context("provisioning VM disk")?;
             record.disk = provisioned.disk.clone();
             record.lvm_lv = provisioned.lvm_lv.clone();
             record.nbd_pid = provisioned.nbd_pid;
@@ -429,9 +527,15 @@ impl VmManager {
             record.guest_ip = network.guest_ip.clone();
 
             let effective_cloud_init = Self::effective_cloud_init(&req);
-            let static_net = network.guest_cidr.as_deref().zip(network.gateway.as_deref());
+            let static_net = network
+                .guest_cidr
+                .as_deref()
+                .zip(network.gateway.as_deref());
             let seed = match &effective_cloud_init {
-                Some(ci) => Some(fluxvm_image::cloudinit::build_seed(&self.cfg, &workspace, ci, static_net).await?),
+                Some(ci) => Some(
+                    fluxvm_image::cloudinit::build_seed(&self.cfg, &workspace, ci, static_net)
+                        .await?,
+                ),
                 None => None,
             };
             record.seed_disk = seed.clone();
@@ -468,20 +572,30 @@ impl VmManager {
             if req.backend == BackendKind::FluxVm {
                 if let Some(ip) = &record.guest_ip {
                     let guest_cidr = format!("{ip}/32");
-                    if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(id, &guest_cidr, &[]) {
+                    if let Err(e) =
+                        fluxvm_network::dataplane::apply_sandbox_policy(id, &guest_cidr, &[])
+                    {
                         tracing::warn!(vm = %id, error = %e, "nftables dataplane apply failed");
                     }
                 }
             }
             Ok(())
-        }.await;
+        }
+        .await;
 
         if let Err(e) = result {
-            if let Some(tap) = &record.tap_name { let _ = fluxvm_network::cleanup(id, &req.network, tap, record.netns.as_deref()).await; }
+            if let Some(tap) = &record.tap_name {
+                let _ =
+                    fluxvm_network::cleanup(id, &req.network, tap, record.netns.as_deref()).await;
+            }
             // A later step (network prep, launch) can fail after the disk
             // was already provisioned — don't leak the LV/qemu-nbd process.
-            if let Some(lv) = &record.lvm_lv { let _ = fluxvm_image::storage::cleanup_lvm_lv(lv).await; }
-            if let Some(pid) = record.nbd_pid { let _ = fluxvm_image::storage::cleanup_nbd(pid).await; }
+            if let Some(lv) = &record.lvm_lv {
+                let _ = fluxvm_image::storage::cleanup_lvm_lv(lv).await;
+            }
+            if let Some(pid) = record.nbd_pid {
+                let _ = fluxvm_image::storage::cleanup_nbd(pid).await;
+            }
             record.status = VmStatus::Failed;
             record.error = Some(format!("{e:#}"));
             self.store.update(record.clone()).await?;
@@ -493,11 +607,20 @@ impl VmManager {
     }
 
     pub async fn list(&self) -> Vec<VmRecord> {
-        self.store.list().await.into_iter().map(Self::with_guest_ip).collect()
+        self.store
+            .list()
+            .await
+            .into_iter()
+            .map(Self::with_guest_ip)
+            .collect()
     }
 
     pub async fn get(&self, id: Uuid) -> Result<VmRecord> {
-        self.store.get(id).await.context("VM not found").map(Self::with_guest_ip)
+        self.store
+            .get(id)
+            .await
+            .context("VM not found")
+            .map(Self::with_guest_ip)
     }
 
     /// Resolves `guest_ip` fresh from the DHCP lease file on every read
@@ -511,7 +634,9 @@ impl VmManager {
             NetworkSpec::Tap { mac: Some(m), .. } => m.as_str(),
             _ => return record,
         };
-        let Some(leasefile) = &record.dhcp_leasefile else { return record };
+        let Some(leasefile) = &record.dhcp_leasefile else {
+            return record;
+        };
         // The address is reserved (dnsmasq --dhcp-host) the moment the
         // namespace is created -- record.guest_ip is already set to it at
         // create/start time. A lease-file hit here just confirms the guest
@@ -559,7 +684,10 @@ impl VmManager {
         // check `exists()` against. LvmThin (a block device) and Nbd (the
         // local qcow2 file the export serves) both really do live on disk.
         if vm.request.storage != StorageBackend::CephRbd && !vm.disk.exists() {
-            bail!("cannot start {id}: disk no longer exists at {}", vm.disk.display());
+            bail!(
+                "cannot start {id}: disk no longer exists at {}",
+                vm.disk.display()
+            );
         }
 
         let result: Result<()> = async {
@@ -577,7 +705,8 @@ impl VmManager {
             // `StorageBackend::Nbd`'s qemu-nbd export is left running across
             // stop/start (see `VmRecord::nbd_pid`), so its socket is already
             // there to reattach to — nothing to reprovision.
-            let nbd_export = (vm.request.storage == StorageBackend::Nbd).then(|| vm.workspace.join("nbd.sock"));
+            let nbd_export =
+                (vm.request.storage == StorageBackend::Nbd).then(|| vm.workspace.join("nbd.sock"));
 
             let ctx = LaunchContext {
                 id,
@@ -598,7 +727,9 @@ impl VmManager {
             // too, long after the snapshot it names is stale.
             let mut launch_req = vm.request.clone();
             launch_req.loadvm_tag = loadvm_tag.map(String::from);
-            let launch = backend(vm.backend)?.launch(&self.cfg, &launch_req, &ctx).await?;
+            let launch = backend(vm.backend)?
+                .launch(&self.cfg, &launch_req, &ctx)
+                .await?;
             vm.pid = Some(launch.pid);
             vm.control_socket = launch.control_socket;
             vm.jail_path = launch.jail_path;
@@ -613,7 +744,8 @@ impl VmManager {
 
         if let Err(e) = result {
             if let Some(tap) = &vm.tap_name {
-                let _ = fluxvm_network::cleanup(id, &vm.request.network, tap, vm.netns.as_deref()).await;
+                let _ = fluxvm_network::cleanup(id, &vm.request.network, tap, vm.netns.as_deref())
+                    .await;
             }
             vm.status = VmStatus::Failed;
             vm.error = Some(format!("{e:#}"));
@@ -635,13 +767,21 @@ impl VmManager {
                     Ok(b) => b.graceful_shutdown(&self.cfg, &vm).await.is_ok(),
                     Err(_) => false,
                 };
-                let exited = asked_nicely && process::wait_for_exit(pid, (GRACEFUL_SHUTDOWN_WAIT.as_millis() / 100) as u32).await;
+                let exited = asked_nicely
+                    && process::wait_for_exit(
+                        pid,
+                        (GRACEFUL_SHUTDOWN_WAIT.as_millis() / 100) as u32,
+                    )
+                    .await;
                 if !exited && process::process_alive(pid).await {
                     process::terminate_pid(pid).await?;
                 }
             }
         }
-        if let Some(tap) = &vm.tap_name { let _ = fluxvm_network::cleanup(id, &vm.request.network, tap, vm.netns.as_deref()).await; }
+        if let Some(tap) = &vm.tap_name {
+            let _ =
+                fluxvm_network::cleanup(id, &vm.request.network, tap, vm.netns.as_deref()).await;
+        }
         vm.netns = None;
         // virtiofsd instances aren't reattachable the way qemu-nbd's export
         // is (see the Nbd comment in `start`) — a fresh set gets spawned on
@@ -684,33 +824,78 @@ impl VmManager {
         Ok(vm)
     }
 
-    pub async fn exec(&self, id: Uuid, command: String, timeout_seconds: Option<u64>) -> Result<fluxvm_guest_protocol::AgentResponse> {
+    pub async fn exec(
+        &self,
+        id: Uuid,
+        command: String,
+        timeout_seconds: Option<u64>,
+    ) -> Result<fluxvm_guest_protocol::AgentResponse> {
         let vm = self.get(id).await?;
-        let wait = std::time::Duration::from_secs(timeout_seconds.unwrap_or(fluxvm_guest_protocol::DEFAULT_EXEC_TIMEOUT_SECS) + 5);
-        fluxvm_vsock_client::call(&vm, AgentRequest::Exec { command, timeout_seconds }, wait).await
+        let wait = std::time::Duration::from_secs(
+            timeout_seconds.unwrap_or(fluxvm_guest_protocol::DEFAULT_EXEC_TIMEOUT_SECS) + 5,
+        );
+        fluxvm_vsock_client::call(
+            &vm,
+            AgentRequest::Exec {
+                command,
+                timeout_seconds,
+            },
+            wait,
+        )
+        .await
     }
 
     /// Write a file into the guest over the vsock agent — see
     /// `AgentRequest::PutFile`.
-    pub async fn put_file(&self, id: Uuid, path: String, content_base64: String, mode: Option<u32>) -> Result<fluxvm_guest_protocol::AgentResponse> {
+    pub async fn put_file(
+        &self,
+        id: Uuid,
+        path: String,
+        content_base64: String,
+        mode: Option<u32>,
+    ) -> Result<fluxvm_guest_protocol::AgentResponse> {
         let vm = self.get(id).await?;
-        fluxvm_vsock_client::call(&vm, AgentRequest::PutFile { path, content_base64, mode }, fluxvm_vsock_client::DEFAULT_CALL_TIMEOUT).await
+        fluxvm_vsock_client::call(
+            &vm,
+            AgentRequest::PutFile {
+                path,
+                content_base64,
+                mode,
+            },
+            fluxvm_vsock_client::DEFAULT_CALL_TIMEOUT,
+        )
+        .await
     }
 
     /// Read a file from the guest over the vsock agent — see
     /// `AgentRequest::GetFile`.
-    pub async fn get_file(&self, id: Uuid, path: String) -> Result<fluxvm_guest_protocol::AgentResponse> {
+    pub async fn get_file(
+        &self,
+        id: Uuid,
+        path: String,
+    ) -> Result<fluxvm_guest_protocol::AgentResponse> {
         let vm = self.get(id).await?;
-        fluxvm_vsock_client::call(&vm, AgentRequest::GetFile { path }, fluxvm_vsock_client::DEFAULT_CALL_TIMEOUT).await
+        fluxvm_vsock_client::call(
+            &vm,
+            AgentRequest::GetFile { path },
+            fluxvm_vsock_client::DEFAULT_CALL_TIMEOUT,
+        )
+        .await
     }
 
     /// Open an interactive shell on the guest over the vsock agent — see
     /// `fluxvm_vsock_client::open_shell`. The returned stream is raw PTY
     /// traffic once the handshake completes; callers relay it themselves
     /// (e.g. `fluxvm-api`'s WebSocket console endpoint).
-    pub async fn open_console(&self, id: Uuid, cols: u16, rows: u16) -> Result<fluxvm_vsock_client::ConsoleStream> {
+    pub async fn open_console(
+        &self,
+        id: Uuid,
+        cols: u16,
+        rows: u16,
+    ) -> Result<fluxvm_vsock_client::ConsoleStream> {
         let vm = self.get(id).await?;
-        fluxvm_vsock_client::open_shell(&vm, cols, rows, fluxvm_vsock_client::DEFAULT_CALL_TIMEOUT).await
+        fluxvm_vsock_client::open_shell(&vm, cols, rows, fluxvm_vsock_client::DEFAULT_CALL_TIMEOUT)
+            .await
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<()> {
@@ -759,17 +944,23 @@ impl VmManager {
         }
         if vm.request.storage == StorageBackend::CephRbd {
             if let Some(pool_image) = fluxvm_image::storage::ceph_rbd_ref(&vm.disk) {
-                if let Err(e) = fluxvm_image::storage::cleanup_ceph_rbd(&self.cfg, &pool_image).await {
+                if let Err(e) =
+                    fluxvm_image::storage::cleanup_ceph_rbd(&self.cfg, &pool_image).await
+                {
                     tracing::warn!(vm = %id, error = %e, "failed to remove Ceph RBD clone (unverified backend)");
                 }
             }
         }
-        if vm.workspace.exists() { fs::remove_dir_all(vm.workspace)?; }
+        if vm.workspace.exists() {
+            fs::remove_dir_all(vm.workspace)?;
+        }
         // Firecracker-jailer VMs place resources under a separate chroot
         // tree (`cfg.jailer.chroot_base_dir`, not `state_dir`) that
         // `workspace` above never covers.
         if let Some(jail_path) = &vm.jail_path {
-            if jail_path.exists() { fs::remove_dir_all(jail_path)?; }
+            if jail_path.exists() {
+                fs::remove_dir_all(jail_path)?;
+            }
         }
         Ok(())
     }
@@ -783,7 +974,15 @@ impl VmManager {
                         let mut vm = vm;
                         vm.status = VmStatus::Stopped;
                         vm.pid = None;
-                        if let Some(tap) = &vm.tap_name { let _ = fluxvm_network::cleanup(vm.id, &vm.request.network, tap, vm.netns.as_deref()).await; }
+                        if let Some(tap) = &vm.tap_name {
+                            let _ = fluxvm_network::cleanup(
+                                vm.id,
+                                &vm.request.network,
+                                tap,
+                                vm.netns.as_deref(),
+                            )
+                            .await;
+                        }
                         vm.netns = None;
                         if let Some(cgroup_path) = vm.cgroup_path.take() {
                             if let Ok(mgr) = fluxvm_cgroup::CgroupManager::from_path(cgroup_path) {
@@ -793,7 +992,8 @@ impl VmManager {
                         self.store.update(vm).await?;
                     }
                 }
-            } else if vm.status == VmStatus::Creating && now - vm.created_at > STUCK_CREATING_GRACE {
+            } else if vm.status == VmStatus::Creating && now - vm.created_at > STUCK_CREATING_GRACE
+            {
                 // `create()` sets this placeholder's status to Running or
                 // Failed as its very last step — a record still Creating
                 // this long after `created_at` means the process running
@@ -824,14 +1024,20 @@ impl VmManager {
     pub fn start_reaper(self: &Arc<Self>) {
         let me = self.clone();
         tokio::spawn(async move {
-            let mut tick = tokio::time::interval(std::time::Duration::from_secs(me.cfg.reaper_interval_secs.max(1)));
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(
+                me.cfg.reaper_interval_secs.max(1),
+            ));
             loop {
                 tick.tick().await;
-                if let Err(e) = me.reconcile().await { tracing::warn!(error=?e, "reconcile failed"); }
+                if let Err(e) = me.reconcile().await {
+                    tracing::warn!(error=?e, "reconcile failed");
+                }
                 let now = Utc::now();
                 for vm in me.store.list().await {
                     if vm.expires_at.is_some_and(|t| t <= now) {
-                        if let Err(e) = me.delete(vm.id).await { tracing::warn!(vm=%vm.id, error=?e, "TTL cleanup failed"); }
+                        if let Err(e) = me.delete(vm.id).await {
+                            tracing::warn!(vm=%vm.id, error=?e, "TTL cleanup failed");
+                        }
                     }
                 }
                 for pool in me.pools.list().await {
@@ -863,7 +1069,12 @@ impl VmManager {
         if self.pools.get(&spec.name).await.is_some() {
             bail!("pool '{}' already exists", spec.name);
         }
-        let record = PoolRecord { name: spec.name.clone(), size: spec.size, template: spec.template, members: vec![] };
+        let record = PoolRecord {
+            name: spec.name.clone(),
+            size: spec.size,
+            template: spec.template,
+            members: vec![],
+        };
         self.pools.insert(record.clone()).await?;
         self.spawn_backfill(record.name.clone());
         Ok(record)
@@ -891,9 +1102,15 @@ impl VmManager {
     /// clear "no ready members" error rather than falling back to a slow
     /// synchronous create — a caller who wants that can just call
     /// `create()` directly instead of `claim_from_pool`.
-    pub async fn claim_from_pool(self: &Arc<Self>, name: &str, overrides: ClaimOverrides) -> Result<VmRecord> {
+    pub async fn claim_from_pool(
+        self: &Arc<Self>,
+        name: &str,
+        overrides: ClaimOverrides,
+    ) -> Result<VmRecord> {
         let Some(id) = self.pools.pop_member(name).await? else {
-            bail!("pool '{name}' has no ready members right now — try again shortly, or increase its size");
+            bail!(
+                "pool '{name}' has no ready members right now — try again shortly, or increase its size"
+            );
         };
         self.spawn_backfill(name.to_string());
 
@@ -912,7 +1129,9 @@ impl VmManager {
             vm.name = new_name;
         }
         vm.request.ttl_seconds = overrides.ttl_seconds;
-        vm.expires_at = overrides.ttl_seconds.map(|s| Utc::now() + Duration::seconds(s as i64));
+        vm.expires_at = overrides
+            .ttl_seconds
+            .map(|s| Utc::now() + Duration::seconds(s as i64));
         self.store.update(vm.clone()).await?;
         Ok(vm)
     }
@@ -941,7 +1160,10 @@ impl VmManager {
 
     async fn backfill_lock(&self, name: &str) -> Arc<AsyncMutex<()>> {
         let mut locks = self.backfill_locks.lock().await;
-        locks.entry(name.to_string()).or_insert_with(|| Arc::new(AsyncMutex::new(()))).clone()
+        locks
+            .entry(name.to_string())
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone()
     }
 
     async fn backfill_pool(self: &Arc<Self>, name: &str) -> Result<()> {
@@ -953,7 +1175,9 @@ impl VmManager {
         let _guard = lock.lock().await;
 
         loop {
-            let Some(record) = self.pools.get(name).await else { return Ok(()) }; // pool deleted meanwhile
+            let Some(record) = self.pools.get(name).await else {
+                return Ok(());
+            }; // pool deleted meanwhile
             if record.members.len() >= record.size {
                 return Ok(());
             }
@@ -974,7 +1198,8 @@ impl VmManager {
             if vm.request.agent.as_ref().is_some_and(|a| a.enabled) {
                 if let Err(e) = wait_for_agent_ready(&vm).await {
                     let _ = self.delete(vm.id).await;
-                    return Err(e).context("waiting for new pool member's guest agent to become ready");
+                    return Err(e)
+                        .context("waiting for new pool member's guest agent to become ready");
                 }
             }
 
@@ -1015,11 +1240,17 @@ const POOL_MEMBER_READY_TIMEOUT: std::time::Duration = std::time::Duration::from
 async fn wait_for_agent_ready(vm: &VmRecord) -> Result<()> {
     let deadline = tokio::time::Instant::now() + POOL_MEMBER_READY_TIMEOUT;
     loop {
-        if fluxvm_vsock_client::ping(vm, std::time::Duration::from_secs(5)).await.is_ok() {
+        if fluxvm_vsock_client::ping(vm, std::time::Duration::from_secs(5))
+            .await
+            .is_ok()
+        {
             return Ok(());
         }
         if tokio::time::Instant::now() >= deadline {
-            bail!("guest agent on {} never became reachable within {POOL_MEMBER_READY_TIMEOUT:?}", vm.id);
+            bail!(
+                "guest agent on {} never became reachable within {POOL_MEMBER_READY_TIMEOUT:?}",
+                vm.id
+            );
         }
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
@@ -1079,7 +1310,10 @@ mod tests {
     #[test]
     fn effective_cloud_init_appends_to_an_existing_cloud_init() {
         let mut r = req(BackendKind::Qemu, None, None);
-        r.cloud_init = Some(CloudInitSpec { runcmd: vec!["echo hi".to_string()], ..Default::default() });
+        r.cloud_init = Some(CloudInitSpec {
+            runcmd: vec!["echo hi".to_string()],
+            ..Default::default()
+        });
         r.shared_folders = vec![fluxvm_core::model::SharedFolder {
             host_path: "/srv/data".into(),
             guest_path: "/mnt/data".into(),
@@ -1093,7 +1327,12 @@ mod tests {
     #[test]
     fn non_auto_backend_passes_through_unchanged() {
         let cfg = Config::default();
-        for backend in [BackendKind::Qemu, BackendKind::CloudHypervisor, BackendKind::Firecracker, BackendKind::FluxVm] {
+        for backend in [
+            BackendKind::Qemu,
+            BackendKind::CloudHypervisor,
+            BackendKind::Firecracker,
+            BackendKind::FluxVm,
+        ] {
             let r = req(backend, None, None);
             assert_eq!(resolve_backend(&r, &cfg), backend);
         }
@@ -1141,7 +1380,14 @@ mod tests {
         assert!(backend(BackendKind::Auto).is_err());
     }
 
-    fn req_with(vcpus: u8, memory_mib: u64, disk_size_gib: Option<u64>, ttl_seconds: Option<u64>, backend: BackendKind, image: &str) -> CreateVmRequest {
+    fn req_with(
+        vcpus: u8,
+        memory_mib: u64,
+        disk_size_gib: Option<u64>,
+        ttl_seconds: Option<u64>,
+        backend: BackendKind,
+        image: &str,
+    ) -> CreateVmRequest {
         let mut r = req(backend, None, None);
         r.vcpus = vcpus;
         r.memory_mib = memory_mib;
@@ -1154,7 +1400,14 @@ mod tests {
     #[test]
     fn empty_policy_allows_anything() {
         let cfg = Config::default();
-        let r = req_with(64, 1_000_000, Some(9999), None, BackendKind::Qemu, "/anywhere/x.qcow2");
+        let r = req_with(
+            64,
+            1_000_000,
+            Some(9999),
+            None,
+            BackendKind::Qemu,
+            "/anywhere/x.qcow2",
+        );
         assert!(validate_policy(&r, &cfg).is_ok());
     }
 
@@ -1212,7 +1465,14 @@ mod tests {
         cfg.policy.allowed_image_dirs = Some(vec!["/var/lib/fluxvm/images".into()]);
         let outside = req_with(1, 512, None, None, BackendKind::Qemu, "/tmp/evil.qcow2");
         assert!(validate_policy(&outside, &cfg).is_err());
-        let inside = req_with(1, 512, None, None, BackendKind::Qemu, "/var/lib/fluxvm/images/base.qcow2");
+        let inside = req_with(
+            1,
+            512,
+            None,
+            None,
+            BackendKind::Qemu,
+            "/var/lib/fluxvm/images/base.qcow2",
+        );
         assert!(validate_policy(&inside, &cfg).is_ok());
     }
 }

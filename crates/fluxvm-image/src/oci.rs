@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! OCI → raw rootfs export for FluxVm templates.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::Path;
 use tokio::process::Command;
 
@@ -31,7 +31,11 @@ pub async fn export_rootfs_raw(image_ref: &str, out: &Path) -> Result<()> {
     } else {
         let oci_dir = work.join("oci");
         let status = Command::new("skopeo")
-            .args(["copy", &format!("docker://{image_ref}"), &format!("oci:{}", oci_dir.display())])
+            .args([
+                "copy",
+                &format!("docker://{image_ref}"),
+                &format!("oci:{}", oci_dir.display()),
+            ])
             .status()
             .await;
         match status {
@@ -43,7 +47,11 @@ pub async fn export_rootfs_raw(image_ref: &str, out: &Path) -> Result<()> {
         }
         let unpack = work.join("rootfs");
         let status = Command::new("umoci")
-            .args(["unpack", "--image", &format!("{}:latest", oci_dir.display())])
+            .args([
+                "unpack",
+                "--image",
+                &format!("{}:latest", oci_dir.display()),
+            ])
             .arg(&unpack)
             .status()
             .await;

@@ -44,7 +44,8 @@ pub async fn save(st: &VmState, path: &Path) -> Result<()> {
 
 /// Load snapshot metadata only (caller reboots/restores guest).
 pub fn load_spec(path: &Path) -> Result<SnapshotSpec> {
-    let raw = fs::read_to_string(path).with_context(|| format!("reading snapshot {}", path.display()))?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("reading snapshot {}", path.display()))?;
     let spec: SnapshotSpec = serde_json::from_str(&raw)?;
     if !spec.disk_path.exists() {
         bail!("snapshot disk missing: {}", spec.disk_path.display());

@@ -26,7 +26,13 @@ fn gather(mem: &GuestMemory, desc_base: u64, head: u16) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-fn used_push(mem: &mut GuestMemory, used_gpa: u64, qnum: u32, desc_id: u16, written: u32) -> Result<()> {
+fn used_push(
+    mem: &mut GuestMemory,
+    used_gpa: u64,
+    qnum: u32,
+    desc_id: u16,
+    written: u32,
+) -> Result<()> {
     let idx = mem.read_u16(used_gpa + 2)?;
     let slot = (idx as u32) % qnum;
     let elem = used_gpa + 4 + slot as u64 * 8;

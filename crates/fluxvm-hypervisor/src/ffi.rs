@@ -26,13 +26,27 @@ extern "C" {
 #[cfg(fluxvm_no_host_c)]
 mod stubs {
     use super::*;
-    pub unsafe fn flux_ioctl(_: c_int, _: c_ulong, _: *mut c_void) -> c_int { -1 }
-    pub unsafe fn flux_tap_open(_: *const c_char) -> c_int { -1 }
-    pub unsafe fn flux_if_up(_: *const c_char) -> c_int { -1 }
-    pub unsafe fn flux_if_addr(_: *const c_char, _: u32, _: u32) -> c_int { -1 }
-    pub unsafe fn flux_errno() -> c_int { 38 } // ENOSYS
-    pub unsafe fn open(_: *const c_char, _: c_int) -> c_int { -1 }
-    pub unsafe fn close(_: c_int) -> c_int { -1 }
+    pub unsafe fn flux_ioctl(_: c_int, _: c_ulong, _: *mut c_void) -> c_int {
+        -1
+    }
+    pub unsafe fn flux_tap_open(_: *const c_char) -> c_int {
+        -1
+    }
+    pub unsafe fn flux_if_up(_: *const c_char) -> c_int {
+        -1
+    }
+    pub unsafe fn flux_if_addr(_: *const c_char, _: u32, _: u32) -> c_int {
+        -1
+    }
+    pub unsafe fn flux_errno() -> c_int {
+        38
+    } // ENOSYS
+    pub unsafe fn open(_: *const c_char, _: c_int) -> c_int {
+        -1
+    }
+    pub unsafe fn close(_: c_int) -> c_int {
+        -1
+    }
     pub unsafe fn mmap(
         _: *mut c_void,
         _: usize,
@@ -43,9 +57,15 @@ mod stubs {
     ) -> *mut c_void {
         MAP_FAILED as *mut c_void
     }
-    pub unsafe fn munmap(_: *mut c_void, _: usize) -> c_int { -1 }
-    pub unsafe fn read(_: c_int, _: *mut c_void, _: usize) -> isize { -1 }
-    pub unsafe fn write(_: c_int, _: *const c_void, _: usize) -> isize { -1 }
+    pub unsafe fn munmap(_: *mut c_void, _: usize) -> c_int {
+        -1
+    }
+    pub unsafe fn read(_: c_int, _: *mut c_void, _: usize) -> isize {
+        -1
+    }
+    pub unsafe fn write(_: c_int, _: *const c_void, _: usize) -> isize {
+        -1
+    }
 }
 
 #[cfg(fluxvm_no_host_c)]

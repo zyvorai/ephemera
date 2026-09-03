@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Agent-sandbox helpers: templates, AutoPause activity tracking, snapshot create.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
 use fluxvm_core::model::{BackendKind, CreateVmRequest, VmRecord, VmStatus};
 use serde::{Deserialize, Serialize};
@@ -35,7 +35,10 @@ pub struct TemplateInfo {
 impl VmManager {
     /// Create a sandbox VM. Forces `BackendKind::FluxVm` unless the embedded
     /// spec already names FluxVm.
-    pub async fn create_sandbox(self: &std::sync::Arc<Self>, req: SandboxCreateRequest) -> Result<VmRecord> {
+    pub async fn create_sandbox(
+        self: &std::sync::Arc<Self>,
+        req: SandboxCreateRequest,
+    ) -> Result<VmRecord> {
         let mut create = if let Some(template) = &req.template {
             self.load_template_spec(template).await?
         } else if let Some(spec) = req.spec {
@@ -192,10 +195,7 @@ impl VmManager {
             if vm.backend != BackendKind::FluxVm || vm.status != VmStatus::Running {
                 continue;
             }
-            let last = self
-                .last_activity(vm.id)
-                .await
-                .unwrap_or(vm.created_at);
+            let last = self.last_activity(vm.id).await.unwrap_or(vm.created_at);
             if last < cutoff {
                 if self.pause(vm.id).await.is_ok() {
                     n += 1;

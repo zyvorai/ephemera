@@ -66,11 +66,21 @@ pub struct DisposableVmSpec {
     pub ttl_seconds: Option<u64>,
 }
 
-fn default_backend() -> String { "qemu".into() }
-fn default_vcpus() -> u8 { 2 }
-fn default_memory_mib() -> u64 { 2048 }
-fn default_network_mode() -> String { "none".into() }
-fn default_storage() -> String { "default".into() }
+fn default_backend() -> String {
+    "qemu".into()
+}
+fn default_vcpus() -> u8 {
+    2
+}
+fn default_memory_mib() -> u64 {
+    2048
+}
+fn default_network_mode() -> String {
+    "none".into()
+}
+fn default_storage() -> String {
+    "default".into()
+}
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

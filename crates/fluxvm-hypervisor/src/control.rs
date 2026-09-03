@@ -15,7 +15,11 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 /// Serve JSON-line requests on `api_sock` until shutdown.
-pub async fn serve(api_sock: PathBuf, initial: Option<BootConfig>, workspace: PathBuf) -> Result<()> {
+pub async fn serve(
+    api_sock: PathBuf,
+    initial: Option<BootConfig>,
+    workspace: PathBuf,
+) -> Result<()> {
     let _ = std::fs::remove_file(&api_sock);
     if let Some(parent) = api_sock.parent() {
         std::fs::create_dir_all(parent)?;
@@ -165,7 +169,10 @@ async fn dispatch(state: Arc<Mutex<VmState>>, req: ApiRequest, workspace: &Path)
                                 st.lifecycle = VmLifecycle::Running;
                                 st.touch();
                                 return ApiResponse::Ok {
-                                    message: format!("restored (memory snapshot) {}", path.display()),
+                                    message: format!(
+                                        "restored (memory snapshot) {}",
+                                        path.display()
+                                    ),
                                 };
                             }
                             Err(e) => {

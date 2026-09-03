@@ -55,8 +55,18 @@ pub struct SnapshotSpec {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ApiResponse {
-    Ok { message: String },
-    State { lifecycle: String },
-    Metrics { memory_mib: u64, vcpus: u8, lifecycle: String },
-    Error { message: String },
+    Ok {
+        message: String,
+    },
+    State {
+        lifecycle: String,
+    },
+    Metrics {
+        memory_mib: u64,
+        vcpus: u8,
+        lifecycle: String,
+    },
+    Error {
+        message: String,
+    },
 }

@@ -23,7 +23,12 @@ impl VmBackend for FluxVmBackend {
         BackendKind::FluxVm
     }
 
-    async fn launch(&self, cfg: &Config, req: &CreateVmRequest, ctx: &LaunchContext) -> Result<LaunchResult> {
+    async fn launch(
+        &self,
+        cfg: &Config,
+        req: &CreateVmRequest,
+        ctx: &LaunchContext,
+    ) -> Result<LaunchResult> {
         let kernel = req
             .kernel
             .as_ref()
@@ -41,17 +46,22 @@ impl VmBackend for FluxVmBackend {
             seed: ctx.seed_disk.clone(),
             memory_mib: req.memory_mib,
             vcpus: req.vcpus,
-            kernel_args: req.kernel_args.clone().or_else(|| {
-                Some("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw".into())
-            }),
+            kernel_args: req
+                .kernel_args
+                .clone()
+                .or_else(|| Some("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw".into())),
             tap: match &ctx.network.spec {
-                NetworkSpec::Tap { tap_name: Some(t), .. } => Some(t.clone()),
+                NetworkSpec::Tap {
+                    tap_name: Some(t), ..
+                } => Some(t.clone()),
                 NetworkSpec::None => None,
                 NetworkSpec::Tap { tap_name: None, .. } => bail!("tap network was not prepared"),
                 NetworkSpec::Macvtap { .. } => bail!(
                     "FluxVm backend does not support macvtap yet; use network.mode=tap or none"
                 ),
-                NetworkSpec::User { .. } => bail!("FluxVm backend requires network.mode=none or tap"),
+                NetworkSpec::User { .. } => {
+                    bail!("FluxVm backend requires network.mode=none or tap")
+                }
             },
             mac: match &ctx.network.spec {
                 NetworkSpec::Tap { mac, .. } => mac.clone(),
@@ -71,8 +81,11 @@ impl VmBackend for FluxVmBackend {
             "--boot-config".into(),
             boot_path.display().to_string(),
         ];
-        let (program, args) =
-            netns_wrap(ctx.network.netns.as_deref(), &cfg.fluxvm_hypervisor_binary, &args);
+        let (program, args) = netns_wrap(
+            ctx.network.netns.as_deref(),
+            &cfg.fluxvm_hypervisor_binary,
+            &args,
+        );
         let child = spawn_logged_with_env(
             &program,
             &args,
@@ -80,7 +93,9 @@ impl VmBackend for FluxVmBackend {
             &[("FLUXVM_FIRECRACKER_BINARY", cfg.firecracker_binary.as_str())],
         )
         .await?;
-        let pid = child.id().context("fluxvm-hypervisor exited before PID was available")?;
+        let pid = child
+            .id()
+            .context("fluxvm-hypervisor exited before PID was available")?;
 
         // Wait until the API answers Ping (boot may be in progress).
         let deadline = tokio::time::Instant::now() + API_TIMEOUT;

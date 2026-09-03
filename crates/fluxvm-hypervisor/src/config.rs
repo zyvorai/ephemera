@@ -84,9 +84,7 @@ impl VmConfig {
                 "--net-queues" => c.net_queues = parse_next(&mut args, "--net-queues")?,
                 "--cmdline" => c.cmdline = req(&mut args, "--cmdline")?,
                 "--firmware" => c.firmware = Some(PathBuf::from(req(&mut args, "--firmware")?)),
-                "--net-mbit-limit" => {
-                    c.net_mbit_limit = parse_next(&mut args, "--net-mbit-limit")?
-                }
+                "--net-mbit-limit" => c.net_mbit_limit = parse_next(&mut args, "--net-mbit-limit")?,
                 "--dry-run" => c.dry_run = true,
                 "--print-host-net" => c.print_host_net = true,
                 other => {
@@ -118,7 +116,10 @@ fn req(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String> {
         .ok_or_else(|| FluxError::Unsupported(format!("{flag} needs a value")))
 }
 
-fn parse_next<T: std::str::FromStr>(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<T>
+fn parse_next<T: std::str::FromStr>(
+    args: &mut impl Iterator<Item = String>,
+    flag: &str,
+) -> Result<T>
 where
     T::Err: std::fmt::Display,
 {

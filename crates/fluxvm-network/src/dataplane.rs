@@ -47,36 +47,13 @@ pub fn apply_sandbox_policy(id: Uuid, guest_cidr: &str, allow_cidrs: &[String]) 
 
     if !allow_cidrs.is_empty() {
         run_nft(&[
-            "add",
-            "chain",
-            "inet",
-            &table,
-            "forward",
-            "{",
-            "type",
-            "filter",
-            "hook",
-            "forward",
-            "priority",
-            "filter;",
-            "policy",
-            "drop;",
-            "}",
+            "add", "chain", "inet", &table, "forward", "{", "type", "filter", "hook", "forward",
+            "priority", "filter;", "policy", "drop;", "}",
         ])?;
         for cidr in allow_cidrs {
             run_nft(&[
-                "add",
-                "rule",
-                "inet",
-                &table,
-                "forward",
-                "ip",
-                "saddr",
-                guest_cidr,
-                "ip",
-                "daddr",
-                cidr,
-                "accept",
+                "add", "rule", "inet", &table, "forward", "ip", "saddr", guest_cidr, "ip", "daddr",
+                cidr, "accept",
             ])?;
         }
         // Always allow established/related return traffic.

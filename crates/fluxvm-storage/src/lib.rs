@@ -12,9 +12,14 @@
 //! lock before mutating and writing it back, so state is coordinated across
 //! processes, not just within one.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use fluxvm_core::model::{PoolRecord, VmRecord};
-use std::{collections::HashMap, fs, os::unix::io::AsRawFd, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    fs,
+    os::unix::io::AsRawFd,
+    path::{Path, PathBuf},
+};
 use uuid::Uuid;
 
 pub struct Store {
@@ -51,7 +56,10 @@ impl Store {
         let path = self.path.clone();
         let lock_path = self.lock_path.clone();
         tokio::task::spawn_blocking(move || -> Result<T> {
-            let lock_file = fs::OpenOptions::new().create(true).write(true).open(&lock_path)
+            let lock_file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .open(&lock_path)
                 .context("opening store lock file")?;
             if unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) } != 0 {
                 bail!("locking store: {}", std::io::Error::last_os_error());
@@ -78,7 +86,10 @@ impl Store {
         let path = self.path.clone();
         let lock_path = self.lock_path.clone();
         tokio::task::spawn_blocking(move || -> Result<T> {
-            let lock_file = fs::OpenOptions::new().create(true).write(true).open(&lock_path)
+            let lock_file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .open(&lock_path)
                 .context("opening store lock file")?;
             if unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_SH) } != 0 {
                 bail!("locking store: {}", std::io::Error::last_os_error());
@@ -104,10 +115,16 @@ impl Store {
     /// race across two concurrent processes (both could read the same "free"
     /// CID before either persists); folding both into one locked operation
     /// closes that window.
-    pub async fn insert_with_cid(&self, mut record: VmRecord, needs_cid: bool, first_cid: u32) -> Result<VmRecord> {
+    pub async fn insert_with_cid(
+        &self,
+        mut record: VmRecord,
+        needs_cid: bool,
+        first_cid: u32,
+    ) -> Result<VmRecord> {
         self.with_exclusive(move |m| {
             if needs_cid {
-                let used: std::collections::HashSet<u32> = m.values().filter_map(|v| v.guest_cid).collect();
+                let used: std::collections::HashSet<u32> =
+                    m.values().filter_map(|v| v.guest_cid).collect();
                 let mut candidate = first_cid;
                 while used.contains(&candidate) {
                     candidate += 1;
@@ -125,7 +142,10 @@ impl Store {
     }
 
     pub async fn get(&self, id: Uuid) -> Option<VmRecord> {
-        self.with_shared(move |m| m.get(&id).cloned()).await.ok().flatten()
+        self.with_shared(move |m| m.get(&id).cloned())
+            .await
+            .ok()
+            .flatten()
     }
 
     pub async fn list(&self) -> Vec<VmRecord> {
@@ -182,7 +202,10 @@ impl PoolStore {
         let path = self.path.clone();
         let lock_path = self.lock_path.clone();
         tokio::task::spawn_blocking(move || -> Result<T> {
-            let lock_file = fs::OpenOptions::new().create(true).write(true).open(&lock_path)
+            let lock_file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .open(&lock_path)
                 .context("opening pool store lock file")?;
             if unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) } != 0 {
                 bail!("locking pool store: {}", std::io::Error::last_os_error());
@@ -206,7 +229,10 @@ impl PoolStore {
         let path = self.path.clone();
         let lock_path = self.lock_path.clone();
         tokio::task::spawn_blocking(move || -> Result<T> {
-            let lock_file = fs::OpenOptions::new().create(true).write(true).open(&lock_path)
+            let lock_file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .open(&lock_path)
                 .context("opening pool store lock file")?;
             if unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_SH) } != 0 {
                 bail!("locking pool store: {}", std::io::Error::last_os_error());
@@ -227,7 +253,10 @@ impl PoolStore {
 
     pub async fn get(&self, name: &str) -> Option<PoolRecord> {
         let name = name.to_string();
-        self.with_shared(move |m| m.get(&name).cloned()).await.ok().flatten()
+        self.with_shared(move |m| m.get(&name).cloned())
+            .await
+            .ok()
+            .flatten()
     }
 
     pub async fn list(&self) -> Vec<PoolRecord> {
@@ -250,7 +279,8 @@ impl PoolStore {
     /// the pool has no ready members right now.
     pub async fn pop_member(&self, name: &str) -> Result<Option<Uuid>> {
         let name = name.to_string();
-        self.with_exclusive(move |m| m.get_mut(&name).and_then(|p| p.members.pop())).await
+        self.with_exclusive(move |m| m.get_mut(&name).and_then(|p| p.members.pop()))
+            .await
     }
 
     /// Atomically appends a freshly-backfilled member id to `name`'s pool.
@@ -260,7 +290,10 @@ impl PoolStore {
     pub async fn push_member(&self, name: &str, member: Uuid) -> Result<bool> {
         let name = name.to_string();
         self.with_exclusive(move |m| match m.get_mut(&name) {
-            Some(p) => { p.members.push(member); true }
+            Some(p) => {
+                p.members.push(member);
+                true
+            }
             None => false,
         })
         .await
@@ -354,7 +387,10 @@ mod tests {
 
         let store_b = Store::load(dir.path()).unwrap();
         let seen = store_b.get(vm.id).await;
-        assert!(seen.is_some(), "a fresh Store instance must see another instance's writes");
+        assert!(
+            seen.is_some(),
+            "a fresh Store instance must see another instance's writes"
+        );
         assert_eq!(seen.unwrap().name, "from-a");
     }
 
@@ -367,8 +403,15 @@ mod tests {
         taken.guest_cid = Some(3);
         store.insert(taken).await.unwrap();
 
-        let assigned = store.insert_with_cid(fixture_record("wants-cid"), true, 3).await.unwrap();
-        assert_eq!(assigned.guest_cid, Some(4), "CID 3 is taken, so the next VM must get 4");
+        let assigned = store
+            .insert_with_cid(fixture_record("wants-cid"), true, 3)
+            .await
+            .unwrap();
+        assert_eq!(
+            assigned.guest_cid,
+            Some(4),
+            "CID 3 is taken, so the next VM must get 4"
+        );
     }
 
     #[tokio::test]
@@ -403,10 +446,18 @@ mod tests {
         }
 
         let unique: HashSet<u32> = cids.iter().copied().collect();
-        assert_eq!(unique.len(), cids.len(), "all concurrently-assigned CIDs must be distinct: {cids:?}");
+        assert_eq!(
+            unique.len(),
+            cids.len(),
+            "all concurrently-assigned CIDs must be distinct: {cids:?}"
+        );
 
         let store = Store::load(&path).unwrap();
-        assert_eq!(store.list().await.len(), 8, "no concurrent write should have been silently lost");
+        assert_eq!(
+            store.list().await.len(),
+            8,
+            "no concurrent write should have been silently lost"
+        );
     }
 
     fn fixture_pool(name: &str) -> fluxvm_core::model::PoolRecord {
@@ -443,7 +494,11 @@ mod tests {
         let popped = store.pop_member("a").await.unwrap();
         assert_eq!(popped, Some(id));
         assert!(store.get("a").await.unwrap().members.is_empty());
-        assert_eq!(store.pop_member("a").await.unwrap(), None, "popping an empty pool must not error");
+        assert_eq!(
+            store.pop_member("a").await.unwrap(),
+            None,
+            "popping an empty pool must not error"
+        );
     }
 
     #[tokio::test]
@@ -479,11 +534,19 @@ mod tests {
         }
         let mut popped = Vec::new();
         for h in handles {
-            popped.push(h.await.unwrap().expect("every claim should get a member — 8 popped from 8 seeded"));
+            popped.push(
+                h.await
+                    .unwrap()
+                    .expect("every claim should get a member — 8 popped from 8 seeded"),
+            );
         }
 
         let unique: HashSet<Uuid> = popped.iter().copied().collect();
-        assert_eq!(unique.len(), popped.len(), "no two concurrent claims may pop the same member: {popped:?}");
+        assert_eq!(
+            unique.len(),
+            popped.len(),
+            "no two concurrent claims may pop the same member: {popped:?}"
+        );
         assert_eq!(unique, all_ids);
         assert!(store.get("a").await.unwrap().members.is_empty());
     }

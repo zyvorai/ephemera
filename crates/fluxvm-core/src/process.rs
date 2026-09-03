@@ -1,7 +1,7 @@
 // Copyright 2026 Zyvor
 // SPDX-License-Identifier: Apache-2.0
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::{fs::OpenOptions, path::Path, process::Stdio};
 use tokio::process::{Child, Command};
 
@@ -25,7 +25,11 @@ pub async fn run_checked(program: &str, args: &[String]) -> Result<()> {
 /// Like `run_checked`, but bounded — used for calls to a VMM's own control
 /// CLI (e.g. `ch-remote`), where a wedged VMM must not hang the caller
 /// forever.
-pub async fn run_checked_timeout(program: &str, args: &[String], timeout: std::time::Duration) -> Result<()> {
+pub async fn run_checked_timeout(
+    program: &str,
+    args: &[String],
+    timeout: std::time::Duration,
+) -> Result<()> {
     tokio::time::timeout(timeout, run_checked(program, args))
         .await
         .with_context(|| format!("{program} timed out after {timeout:?}"))?
@@ -38,7 +42,11 @@ pub async fn output_checked(program: &str, args: &[String]) -> Result<String> {
         .await
         .with_context(|| format!("starting {program}"))?;
     if !out.status.success() {
-        bail!("{} failed: {}", program, String::from_utf8_lossy(&out.stderr));
+        bail!(
+            "{} failed: {}",
+            program,
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
@@ -53,7 +61,12 @@ pub async fn output_checked(program: &str, args: &[String]) -> Result<String> {
 pub fn netns_wrap(netns: Option<&str>, program: &str, args: &[String]) -> (String, Vec<String>) {
     match netns {
         Some(ns) => {
-            let mut wrapped = vec!["netns".to_string(), "exec".to_string(), ns.to_string(), program.to_string()];
+            let mut wrapped = vec![
+                "netns".to_string(),
+                "exec".to_string(),
+                ns.to_string(),
+                program.to_string(),
+            ];
             wrapped.extend(args.iter().cloned());
             ("ip".to_string(), wrapped)
         }
@@ -82,8 +95,7 @@ pub async fn spawn_logged_with_env(
     for (k, v) in env {
         cmd.env(k, v);
     }
-    cmd.spawn()
-        .with_context(|| format!("spawning {program}"))
+    cmd.spawn().with_context(|| format!("spawning {program}"))
 }
 
 /// Polls `process_alive` every 100ms, up to `attempts` times, returning
@@ -116,7 +128,11 @@ pub async fn terminate_pid(pid: u32) -> Result<()> {
     if wait_for_exit(pid, 50).await {
         return Ok(());
     }
-    let _ = Command::new("kill").arg("-KILL").arg(pid.to_string()).status().await;
+    let _ = Command::new("kill")
+        .arg("-KILL")
+        .arg(pid.to_string())
+        .status()
+        .await;
     if wait_for_exit(pid, 20).await {
         return Ok(());
     }
@@ -157,11 +173,22 @@ mod tests {
 
     #[test]
     fn netns_wrap_prefixes_ip_netns_exec_when_namespaced() {
-        let (program, args) = netns_wrap(Some("eph-abcd1234"), "qemu-system-x86_64", &["-m".into(), "512".into()]);
+        let (program, args) = netns_wrap(
+            Some("eph-abcd1234"),
+            "qemu-system-x86_64",
+            &["-m".into(), "512".into()],
+        );
         assert_eq!(program, "ip");
         assert_eq!(
             args,
-            vec!["netns", "exec", "eph-abcd1234", "qemu-system-x86_64", "-m", "512"]
+            vec![
+                "netns",
+                "exec",
+                "eph-abcd1234",
+                "qemu-system-x86_64",
+                "-m",
+                "512"
+            ]
         );
     }
 }

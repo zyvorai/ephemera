@@ -8,13 +8,18 @@
 //! original draft this was ported from had none, which meant a wedged QEMU
 //! process could hang the caller forever.
 
-use anyhow::{bail, Context, Result};
-use serde_json::{json, Value};
+use anyhow::{Context, Result, bail};
+use serde_json::{Value, json};
 use std::{io::ErrorKind, path::Path, time::Duration};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, ReadHalf, WriteHalf};
 use tokio::net::UnixStream;
 
-pub async fn execute(socket: &Path, command: &str, args: Option<Value>, timeout: Duration) -> Result<Value> {
+pub async fn execute(
+    socket: &Path,
+    command: &str,
+    args: Option<Value>,
+    timeout: Duration,
+) -> Result<Value> {
     tokio::time::timeout(timeout, execute_inner(socket, command, args))
         .await
         .with_context(|| format!("QMP {command} timed out after {timeout:?}"))?
@@ -32,7 +37,11 @@ pub async fn execute(socket: &Path, command: &str, args: Option<Value>, timeout:
 fn is_transient_startup_error(kind: ErrorKind) -> bool {
     matches!(
         kind,
-        ErrorKind::NotFound | ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset | ErrorKind::BrokenPipe | ErrorKind::UnexpectedEof
+        ErrorKind::NotFound
+            | ErrorKind::ConnectionRefused
+            | ErrorKind::ConnectionReset
+            | ErrorKind::BrokenPipe
+            | ErrorKind::UnexpectedEof
     )
 }
 
@@ -55,7 +64,9 @@ async fn handshake_retrying(socket: &Path) -> Result<QmpHalves> {
                 tokio::time::sleep(delay).await;
                 delay = (delay * 2).min(Duration::from_millis(500));
             }
-            Err(e) => return Err(e).with_context(|| format!("QMP handshake with {}", socket.display())),
+            Err(e) => {
+                return Err(e).with_context(|| format!("QMP handshake with {}", socket.display()));
+            }
         }
     }
 }
@@ -68,20 +79,41 @@ async fn try_handshake(socket: &Path) -> std::io::Result<QmpHalves> {
     // Greeting: QEMU sends {"QMP": {...}} immediately on connect.
     let mut greeting = String::new();
     if reader.read_line(&mut greeting).await? == 0 {
-        return Err(std::io::Error::new(ErrorKind::UnexpectedEof, "connection closed before QMP greeting"));
+        return Err(std::io::Error::new(
+            ErrorKind::UnexpectedEof,
+            "connection closed before QMP greeting",
+        ));
     }
-    if serde_json::from_str::<Value>(&greeting).ok().and_then(|v| v.get("QMP").cloned()).is_none() {
-        return Err(std::io::Error::new(ErrorKind::InvalidData, format!("unexpected QMP greeting: {greeting:?}")));
+    if serde_json::from_str::<Value>(&greeting)
+        .ok()
+        .and_then(|v| v.get("QMP").cloned())
+        .is_none()
+    {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidData,
+            format!("unexpected QMP greeting: {greeting:?}"),
+        ));
     }
 
     // Capabilities negotiation is required before any other command works.
-    write_half.write_all(b"{\"execute\":\"qmp_capabilities\"}\n").await?;
+    write_half
+        .write_all(b"{\"execute\":\"qmp_capabilities\"}\n")
+        .await?;
     let mut cap_response = String::new();
     if reader.read_line(&mut cap_response).await? == 0 {
-        return Err(std::io::Error::new(ErrorKind::UnexpectedEof, "connection closed before qmp_capabilities response"));
+        return Err(std::io::Error::new(
+            ErrorKind::UnexpectedEof,
+            "connection closed before qmp_capabilities response",
+        ));
     }
-    if let Some(err) = serde_json::from_str::<Value>(&cap_response).ok().and_then(|v| v.get("error").cloned()) {
-        return Err(std::io::Error::new(ErrorKind::InvalidData, format!("qmp_capabilities rejected: {err}")));
+    if let Some(err) = serde_json::from_str::<Value>(&cap_response)
+        .ok()
+        .and_then(|v| v.get("error").cloned())
+    {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidData,
+            format!("qmp_capabilities rejected: {err}"),
+        ));
     }
 
     Ok((reader, write_half))
@@ -105,10 +137,16 @@ async fn execute_inner(socket: &Path, command: &str, args: Option<Value>) -> Res
     // loop with no cap — here the outer `timeout` in `execute` is the cap).
     loop {
         let mut line = String::new();
-        if reader.read_line(&mut line).await.context("reading QMP response")? == 0 {
+        if reader
+            .read_line(&mut line)
+            .await
+            .context("reading QMP response")?
+            == 0
+        {
             bail!("QEMU closed the QMP connection without responding to {command}");
         }
-        let response: Value = serde_json::from_str(&line).with_context(|| format!("parsing QMP response: {line}"))?;
+        let response: Value =
+            serde_json::from_str(&line).with_context(|| format!("parsing QMP response: {line}"))?;
         if response.get("event").is_some() {
             continue;
         }
@@ -130,7 +168,10 @@ mod tests {
         let (read_half, mut write_half) = stream.into_split();
         let mut reader = BufReader::new(read_half);
 
-        write_half.write_all(b"{\"QMP\":{\"version\":{}}}\n").await.unwrap();
+        write_half
+            .write_all(b"{\"QMP\":{\"version\":{}}}\n")
+            .await
+            .unwrap();
         let mut caps = String::new();
         reader.read_line(&mut caps).await.unwrap();
         write_half.write_all(b"{\"return\":{}}\n").await.unwrap();
@@ -139,7 +180,10 @@ mod tests {
         reader.read_line(&mut req).await.unwrap();
         let req: Value = serde_json::from_str(&req).unwrap();
         assert_eq!(req["execute"], command);
-        write_half.write_all(b"{\"return\":{\"status\":\"ok\"}}\n").await.unwrap();
+        write_half
+            .write_all(b"{\"return\":{\"status\":\"ok\"}}\n")
+            .await
+            .unwrap();
 
         // Keep the connection open briefly so the client's read isn't racing
         // a closed socket; then just let it drop.
@@ -154,7 +198,9 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
         let server = tokio::spawn(serve_one_command(listener, "stop"));
 
-        let result = execute(&path, "stop", None, Duration::from_secs(5)).await.unwrap();
+        let result = execute(&path, "stop", None, Duration::from_secs(5))
+            .await
+            .unwrap();
         assert_eq!(result["status"], "ok");
         server.await.unwrap();
     }
@@ -178,7 +224,9 @@ mod tests {
             serve_one_command(listener, "cont").await;
         });
 
-        let result = execute(&path, "cont", None, Duration::from_secs(5)).await.unwrap();
+        let result = execute(&path, "cont", None, Duration::from_secs(5))
+            .await
+            .unwrap();
         assert_eq!(result["status"], "ok");
         server.await.unwrap();
     }
@@ -202,14 +250,19 @@ mod tests {
             // answering qmp_capabilities — the client sees EOF/reset mid-handshake.
             let (stream, _) = listener.accept().await.unwrap();
             let (_read_half, mut write_half) = stream.into_split();
-            write_half.write_all(b"{\"QMP\":{\"version\":{}}}\n").await.unwrap();
+            write_half
+                .write_all(b"{\"QMP\":{\"version\":{}}}\n")
+                .await
+                .unwrap();
             drop(write_half);
 
             // Second connection: a normal, complete handshake + command.
             serve_one_command(listener, "stop").await;
         });
 
-        let result = execute(&path, "stop", None, Duration::from_secs(5)).await.unwrap();
+        let result = execute(&path, "stop", None, Duration::from_secs(5))
+            .await
+            .unwrap();
         assert_eq!(result["status"], "ok");
         server.await.unwrap();
     }
@@ -218,7 +271,12 @@ mod tests {
     async fn gives_up_once_the_overall_timeout_elapses() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("qmp.sock"); // never created
-        let err = execute(&path, "stop", None, Duration::from_millis(150)).await.unwrap_err();
-        assert!(format!("{err:#}").contains("timed out"), "unexpected error: {err:#}");
+        let err = execute(&path, "stop", None, Duration::from_millis(150))
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("timed out"),
+            "unexpected error: {err:#}"
+        );
     }
 }
