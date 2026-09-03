@@ -61,7 +61,8 @@ sudo fluxvm build-image --spec golden-image.json
 ```
 
 See [`docs/build-image-tutorials.md`](build-image-tutorials.md) for the same
-walkthrough across Debian/Ubuntu, RHEL-family, and Arch base images. Pair it
+walkthrough across Debian/Ubuntu, RHEL-family, Arch, and Windows
+(`windows{}` + Zyvor GuestKit agent) base images. Pair it
 with the image catalog (SHA-256 + optional Ed25519 signing, see "Image
 catalog & signing" in the README) to give every VM a provenance guarantee —
 `allowed_image_dirs` and `trusted_signers` mean a tenant can reference an

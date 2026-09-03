@@ -20,7 +20,7 @@ Every route is also listed in the [complete page index](../PAGE_INDEX.md).
 
 | Page | What it covers |
 |------|----------------|
-| [Build Custom Images](images/build-image-tutorial.md) | Build and customize guest OS images for disposable VMs. |
+| [Build Custom Images](images/build-image-tutorial.md) | Build and customize Linux or Windows guest images (GuestKit). |
 
 ## Integrations
 

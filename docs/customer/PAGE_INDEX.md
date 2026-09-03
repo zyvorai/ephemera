@@ -23,7 +23,7 @@ Regenerate: `node scripts/customer-docs/generate-page-index.mjs`
 
 | Page | Route | Purpose | Guide |
 |------|-------|---------|-------|
-| Workflows | `workflows` | Day-to-day create / exec / pause / TTL / warm-pool jobs. | [Open](pages/operations/workflows.md) |
+| Workflows | `workflows` | Day-to-day create / exec / pause / TTL / warm-pool / Windows QGA jobs. | [Open](pages/operations/workflows.md) |
 
 ## Admin
 
@@ -41,7 +41,7 @@ Regenerate: `node scripts/customer-docs/generate-page-index.mjs`
 
 | Page | Route | Purpose | Guide |
 |------|-------|---------|-------|
-| Build Custom Images | `build-image-tutorial` | Build and customize guest OS images for disposable VMs. | [Open](pages/images/build-image-tutorial.md) |
+| Build Custom Images | `build-image-tutorial` | Build and customize Linux or Windows guest images (GuestKit). | [Open](pages/images/build-image-tutorial.md) |
 
 ## Integrations
 

@@ -55,7 +55,8 @@ Build a customized, versioned base image once — package installs,
 hostname, SSH keys, a baked-in agent binary — and reuse it across every VM
 you create from it, instead of provisioning each VM from scratch at boot
 time. See [Building custom OS images](../images/build-image-tutorial.md) for the full
-walkthrough across Debian/Ubuntu, RHEL-family, and Arch base images.
+walkthrough across Debian/Ubuntu, RHEL-family, Arch, and Windows (`windows{}`
++ Zyvor GuestKit agent).
 
 Pair it with the image catalog (SHA-256 + optional Ed25519 signing) to give
 every VM a provenance guarantee — a tenant references an image by name, and

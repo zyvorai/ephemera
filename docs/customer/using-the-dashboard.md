@@ -8,12 +8,15 @@ FluxVM is primarily a **CLI + REST** control plane (no first-party web console).
 fluxvm create --spec examples/qemu.json
 fluxvm list
 fluxvm exec <id> -- echo hello
+fluxvm qga ping <id>   # Windows / QEMU GuestKit agent (requires qga.enabled)
 fluxvm delete <id>
 ```
 
 ## REST surface
 
-The control plane exposes HTTP endpoints for create/list/get/delete/exec and related lifecycle calls. Point clients (including Ragnarok and Zyvor Fabric) at the configured listen address.
+The control plane exposes HTTP endpoints for create/list/get/delete/exec,
+QGA (`/v1/vms/{id}/qga/…`), and related lifecycle calls. Point clients
+(including Ragnarok and Zyvor Fabric) at the configured listen address.
 
 ## Where to go next
 

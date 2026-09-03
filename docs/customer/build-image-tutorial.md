@@ -8,8 +8,7 @@ Use **GuestKit only** — never libguestfs, `virt-customize`, or `guestfish`.
 There is **no VM boot**, so `build-image` doesn't need `/dev/kvm` — only root
 and the `nbd` kernel module. Windows disks use a `windows{}` block (offline
 RDP/WinRM/firewall/scripts and Zyvor GuestKit agent inject) instead of the
-Linux chroot path — see `examples/build-image-windows.json` and
-`fluxvm qga` for live PowerShell/firewall after boot with `qga.enabled`.
+Linux chroot path — see [Windows images](#windows-images) below.
 
 This page walks through the three package-manager families `build-image`
 supports: Debian/Ubuntu (`apt`), RHEL-family (`dnf`/`tdnf`/`yum`), and Arch
@@ -50,7 +49,9 @@ sudo modprobe nbd max_part=16
 
 `scripts/bootstrap-host.sh` does this for you as part of general host setup.
 You need root (for the `qemu-nbd` mount) and enough free disk for a copy of
-the base image plus the output image — no VMM, no `/dev/kvm`.
+the base image plus the output image — no VMM, no `/dev/kvm`. For Windows
+offline customize, also install `libhivex-dev` (Debian/Ubuntu) or
+`hivex-devel` (RHEL-family); bootstrap and remote deploy install it.
 
 ## Debian / Ubuntu
 
@@ -133,6 +134,71 @@ Arch's official cloud image doesn't ship cron by default, so this example
 enables `sshd` (which *is* preinstalled) instead — add `"cronie"` to
 `packages` and use `enable_services: ["cronie"]` if you want cron.
 
+## Windows images
+
+Use a `windows{}` block instead of Linux fields. Do **not** mix
+`windows{}` with `packages`, `commands`, `enable_services`, `ssh_key`,
+`copy_in`, or top-level `hostname`.
+
+```json
+{
+  "source": "/var/lib/fluxvm/images/windows-base.qcow2",
+  "output": "/var/lib/fluxvm/images/windows-custom.qcow2",
+  "format": "qcow2",
+  "windows": {
+    "hostname": "win-lab",
+    "enable_rdp": true,
+    "enable_winrm": false,
+    "firewall_open": [
+      { "name": "ZyvorApp", "port": 8080, "protocol": "tcp" }
+    ],
+    "scripts": [
+      {
+        "name": "hello",
+        "powershell": true,
+        "content": "Set-Content -Path C:\\fluxvm-ready.txt -Value ok\r\n"
+      }
+    ],
+    "agent": {
+      "binary": "/path/to/guestkitd.exe",
+      "virtio_serial_driver": "/usr/share/virtio-win/vioserial/w10/amd64"
+    }
+  }
+}
+```
+
+```bash
+sudo fluxvm build-image --spec examples/build-image-windows.json
+```
+
+| Field | What it does |
+|---|---|
+| `hostname` | Offline Windows hostname plan (GuestKit) |
+| `enable_rdp` / `enable_winrm` | Stock RDP (:3389) / WinRM (:5985) + firewall rules |
+| `firewall_open` / `firewall_close` | Custom inbound FirewallRules blobs |
+| `scripts` / `run_once` | Write files + stage RunOnce for first boot |
+| `user` / `password` | Stage RunOnce `net user` |
+| `agent` | Offline Zyvor/GuestKit `guestkitd.exe` inject (+ optional virtio-serial driver) |
+
+### Boot and live control (QGA)
+
+Create with QEMU and `"qga": {"enabled": true}` so FluxVM adds a
+virtio-serial `org.qemu.guest_agent.0` channel (see
+`examples/windows-qga.json`). After the GuestKit Windows agent is up:
+
+```bash
+fluxvm qga ping <id>
+fluxvm qga powershell <id> -- 'Get-NetFirewallRule | Select-Object -First 5'
+fluxvm qga firewall-open <id> --name ZyvorApp --port 8080 --protocol tcp
+fluxvm qga firewall-close <id> --name ZyvorApp
+```
+
+REST: `POST /v1/vms/{id}/qga/ping`, `/qga/exec`, `/qga/firewall/open`,
+`/qga/firewall/close`. Linux vsock `fluxvm exec` is unchanged and separate.
+
+Gated smoke (skips without a fixture):  
+`WINDOWS_IMAGE=… sudo -E ./scripts/test-windows-customize.sh`.
+
 ## Verifying an image without booting it
 
 Since `build-image` never boots a VM, you can sanity-check the output by
@@ -159,6 +225,12 @@ sudo qemu-nbd -d /dev/nbd0
 - **`enable_services` fails with "unit does not exist"** — the service name
   is distro-specific (`cron` vs `crond`, `ssh` vs `sshd`), or the package
   providing it isn't installed yet.
+- **`windows{}` combined with Linux fields** — FluxVM rejects the request;
+  put hostname under `windows.hostname` and drop `packages` / `commands` /
+  `enable_services` / `ssh_key` / `copy_in`.
+- **Windows agent inject fails** — needs `libhivex` on the host and a
+  Windows `guestkitd.exe` path in `windows.agent.binary`; virtio-serial
+  driver dir is recommended for QGA after first boot.
 
 ## Next steps
 

@@ -3,6 +3,7 @@
 | Topic | Guidance |
 |-------|----------|
 | **Service** | Run `fluxvm serve` under the provided systemd unit; the TTL reaper and pool backfill only run while `serve` is up |
+| **Host deps** | `scripts/bootstrap-host.sh` / remote deploy install QEMU tooling, `nbd`, and `libhivex` (Windows offline customize). Load `nbd` before `build-image` |
 | **Logs** | `journalctl -u fluxvm -f`; each VM also has its own console log under `<state_dir>/instances/<uuid>/console.log` |
 | **State** | `<state_dir>/vms.json` is the source of truth, coordinated across concurrent `fluxvm` processes via an OS-level `flock` on `vms.lock` |
 | **Security** | Bearer-token auth/RBAC is opt-in — configure `[[auth.tokens]]` before exposing the REST API beyond localhost; `extra_args` on a create request is an administrator escape hatch, never expose it to untrusted callers |

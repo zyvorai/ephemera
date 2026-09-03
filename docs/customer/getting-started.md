@@ -34,6 +34,8 @@ fluxvm exec <id> -- echo hello
 
 This runs over the vsock guest agent — no SSH, no network path required at all, as long as the guest image has the agent installed and `agent.enabled: true` was set on the create request.
 
+For **Windows** guests (QEMU + GuestKit agent), use `"qga": {"enabled": true}` on create and `fluxvm qga …` instead of vsock `exec` — see [Building custom OS images](build-image-tutorial.md#windows-images).
+
 ## 4. Let it clean up on its own
 
 Set `ttl_seconds` on the create request and FluxVM's TTL reaper deletes the VM automatically once it expires — or delete it yourself:
@@ -46,6 +48,7 @@ fluxvm delete <id>
 
 - **`create` fails with "base image does not exist"** — the `image` path in the spec must exist on the host running `fluxvm`, and (for the `ceph-rbd`/`lvm-thin` storage backends) follow their specific reference format — see [Configuration](configuration.md).
 - **`exec` hangs or fails** — confirm the create request set `"agent": {"enabled": true}` and the guest image actually has `fluxvm-guest-agent` installed and running.
+- **`qga` fails on Windows** — confirm `"qga": {"enabled": true}`, backend is `qemu`, and the GuestKit Windows agent was injected (`windows.agent` at build-image time).
 - **`/dev/kvm` missing** — enable virtualization in the host's BIOS/hypervisor, and confirm the current user is in the `kvm` group or run as root.
 
 ## Next steps
