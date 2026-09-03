@@ -235,15 +235,11 @@ pub fn build_args(
         let qga = ctx.workspace.join("qga.sock");
         a.extend([
             "-chardev".into(),
-            format!(
-                "socket,path={},server=on,wait=off,id=qga0",
-                path_arg(&qga)
-            ),
+            format!("socket,path={},server=on,wait=off,id=qga0", path_arg(&qga)),
             "-device".into(),
             "virtio-serial-pci,id=virtio-serial0".into(),
             "-device".into(),
-            "virtserialport,bus=virtio-serial0.0,chardev=qga0,name=org.qemu.guest_agent.0"
-                .into(),
+            "virtserialport,bus=virtio-serial0.0,chardev=qga0,name=org.qemu.guest_agent.0".into(),
         ]);
     }
 

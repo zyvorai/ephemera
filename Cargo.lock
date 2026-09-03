@@ -1518,7 +1518,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-agent"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1536,7 +1536,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-api"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1561,7 +1561,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-cgroup"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -1572,7 +1572,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1591,7 +1591,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-cloud-hypervisor"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1600,7 +1600,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1616,7 +1616,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-firecracker"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1628,7 +1628,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-guest-agent"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1640,7 +1640,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-guest-protocol"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1648,7 +1648,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-hypervisor"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1667,7 +1667,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-image"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1687,7 +1687,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-kube"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1706,7 +1706,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-network"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1721,7 +1721,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-qemu"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1735,7 +1735,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-scheduler"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1759,7 +1759,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-storage"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1773,7 +1773,7 @@ dependencies = [
 
 [[package]]
 name = "fluxvm-vsock-client"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "fluxvm-core",
@@ -2014,7 +2014,7 @@ checksum = "b40ca9252762c466af32d0b1002e91e4e1bc5398f77455e55474deb466355ff5"
 
 [[package]]
 name = "guestkit"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "aes 0.8.4",
  "anyhow",

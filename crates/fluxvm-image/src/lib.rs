@@ -8,9 +8,7 @@ pub mod qga;
 pub mod storage;
 pub mod windows;
 
-pub use windows::{
-    FirewallPort, RunOnceEntry, WindowsAgentSpec, WindowsCustomize, WindowsScript,
-};
+pub use windows::{FirewallPort, RunOnceEntry, WindowsAgentSpec, WindowsCustomize, WindowsScript};
 
 use anyhow::{Context, Result, bail};
 use fluxvm_core::{config::Config, model::BackendKind, process::run_checked};

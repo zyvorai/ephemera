@@ -33,7 +33,12 @@ pub fn ping(socket: &Path) -> Result<()> {
 }
 
 /// Run `path` with `args` via `guest-exec`, wait for completion, return output.
-pub fn exec(socket: &Path, path: &str, args: &[String], timeout: Duration) -> Result<QgaExecResult> {
+pub fn exec(
+    socket: &Path,
+    path: &str,
+    args: &[String],
+    timeout: Duration,
+) -> Result<QgaExecResult> {
     let sock = socket.display().to_string();
     let start = call_qga_socket(
         &sock,
@@ -64,14 +69,8 @@ pub fn exec(socket: &Path, path: &str, args: &[String], timeout: Duration) -> Re
             timeout,
         )
         .context("QGA guest-exec-status")?;
-        let ret = status
-            .get("return")
-            .cloned()
-            .unwrap_or(Value::Null);
-        let exited = ret
-            .get("exited")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let ret = status.get("return").cloned().unwrap_or(Value::Null);
+        let exited = ret.get("exited").and_then(|v| v.as_bool()).unwrap_or(false);
         if !exited {
             thread::sleep(EXEC_POLL);
             continue;
@@ -141,12 +140,12 @@ pub fn firewall_close(socket: &Path, name: &str, timeout: Duration) -> Result<Qg
 }
 
 /// Low-level raw QGA JSON (for advanced callers).
-pub fn raw(socket: &Path, execute: &str, arguments: Option<Value>, timeout: Duration) -> Result<Value> {
+pub fn raw(
+    socket: &Path,
+    execute: &str,
+    arguments: Option<Value>,
+    timeout: Duration,
+) -> Result<Value> {
     let _ = qga_request(execute, arguments.clone());
-    call_qga_socket(
-        &socket.display().to_string(),
-        execute,
-        arguments,
-        timeout,
-    )
+    call_qga_socket(&socket.display().to_string(), execute, arguments, timeout)
 }

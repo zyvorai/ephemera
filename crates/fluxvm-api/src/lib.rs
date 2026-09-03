@@ -811,12 +811,10 @@ async fn qga_exec(
     let result = if let Some(ps) = req.powershell {
         m.qga_powershell(id, ps, req.timeout_seconds).await?
     } else {
-        let path = req
-            .path
-            .ok_or_else(|| ApiError {
-                status: StatusCode::BAD_REQUEST,
-                message: "qga exec requires `path` or `powershell`".into(),
-            })?;
+        let path = req.path.ok_or_else(|| ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: "qga exec requires `path` or `powershell`".into(),
+        })?;
         m.qga_exec(id, path, req.args, req.timeout_seconds).await?
     };
     Ok(Json(json!(result)))

@@ -7,10 +7,10 @@
 //! registry plans (`PlanApplicator`) and `inject_windows_agent` instead.
 
 use anyhow::{Context, Result, bail};
+use guestkit::cli::plan::types::FileWrite;
 use guestkit::cli::plan::{
     FixPlan, Operation, OperationType, PlanApplicator, PlanGenerator, Priority, RegistryEdit,
 };
-use guestkit::cli::plan::types::FileWrite;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -260,7 +260,10 @@ fn runonce_op(name: &str, command: &str) -> Operation {
 
 fn add_script_ops(plan: &mut FixPlan, script: &WindowsScript, index: usize) -> Result<()> {
     if script.name.contains('/') || script.name.contains('\\') || script.name.contains("..") {
-        bail!("script name must be a simple basename, got '{}'", script.name);
+        bail!(
+            "script name must be a simple basename, got '{}'",
+            script.name
+        );
     }
     let ext = if script.powershell { "ps1" } else { "cmd" };
     let guest_path = format!("/Windows/Temp/fluxvm-{}.{}", script.name, ext);
@@ -283,9 +286,7 @@ fn add_script_ops(plan: &mut FixPlan, script: &WindowsScript, index: usize) -> R
     });
 
     let cmd = if script.powershell {
-        format!(
-            r#"powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{win_path}""#
-        )
+        format!(r#"powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{win_path}""#)
     } else {
         format!(r#"cmd.exe /c "{win_path}""#)
     };
