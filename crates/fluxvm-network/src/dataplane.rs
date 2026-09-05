@@ -172,17 +172,25 @@ pub fn apply_sandbox_policy(
                 }
                 Err(e) if dp.required || policy_uses_native_only_features(&policy) => Err(e),
                 Err(e) => {
-                    warn!(
+                    // Expected for network.mode=none / user NAT (no host TAP).
+                    tracing::debug!(
                         %id,
                         error = %e,
-                        "native eBPF dataplane unavailable; falling back to nftables"
+                        "native eBPF dataplane unavailable; considering nftables fallback"
                     );
                     match guest_cidr {
-                        Some(cidr) => apply_nftables(id, cidr, &policy),
+                        Some(cidr) => {
+                            warn!(
+                                %id,
+                                error = %e,
+                                "native eBPF dataplane unavailable; falling back to nftables"
+                            );
+                            apply_nftables(id, cidr, &policy)
+                        }
                         // network.mode=none / user NAT: nothing host-visible to pin and
                         // no guest CIDR for nftables — leave the kernel clean.
                         None => {
-                            warn!(
+                            tracing::debug!(
                                 %id,
                                 "skipping dataplane attach: no host interface and no guest CIDR"
                             );
