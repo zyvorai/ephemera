@@ -56,6 +56,11 @@ spec:
               mountPath: /var/lib/fluxvm
             - name: run-fluxvm
               mountPath: /run/fluxvm
+            - name: bpffs
+              mountPath: /sys/fs/bpf
+            - name: cilium-run
+              mountPath: /var/run/cilium
+              readOnly: true
             - name: config
               mountPath: /etc/fluxvm.toml
               subPath: fluxvm.toml
@@ -107,6 +112,14 @@ spec:
         - name: run-fluxvm
           hostPath:
             path: /run/fluxvm
+            type: DirectoryOrCreate
+        - name: bpffs
+          hostPath:
+            path: /sys/fs/bpf
+            type: Directory
+        - name: cilium-run
+          hostPath:
+            path: /var/run/cilium
             type: DirectoryOrCreate
         - name: config
           configMap:

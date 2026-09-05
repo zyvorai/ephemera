@@ -1,9 +1,9 @@
 // Copyright 2026 Zyvor
 // SPDX-License-Identifier: Apache-2.0
 
-use anyhow::Result;
 #[cfg(target_os = "linux")]
 use anyhow::Context;
+use anyhow::Result;
 
 /// Apply process hardening for the FluxVM hypervisor control plane.
 ///
@@ -28,7 +28,7 @@ pub fn apply_minimal() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn apply_seccomp_filter() -> Result<()> {
-    use seccompiler::{BpfProgram, SeccompAction, SeccompFilter, TargetArch, apply_filter};
+    use seccompiler::{apply_filter, BpfProgram, SeccompAction, SeccompFilter, TargetArch};
     use std::collections::BTreeMap;
 
     let allowed: &[i64] = &[

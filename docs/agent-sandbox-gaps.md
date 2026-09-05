@@ -21,7 +21,7 @@ The FluxVM hypervisor track (`backend: "flux-vm"`) is the AI-agent sandbox path.
 | **Multi-port proxy defaults** on sandbox create (`http_proxy_port(s)`) | Yes |
 | AutoPause + activity tracking + wake-on-request | Yes |
 | Egress allowlist + credential vault + live L7 proxy | Yes |
-| **nftables dataplane** per sandbox + `scripts/load-sandbox-tc.sh` stub | Yes |
+| **nftables + native TC/eBPF dataplane** (`legacy` / `ebpf` / `cilium`) | Yes — see [docs/ebpf-cilium.md](ebpf-cilium.md) |
 | OCI → template export | Yes |
 | **Redis shared sandbox index** (`FLUXVM_SANDBOX_STATE_URL`) | Yes |
 | `/console` ops UI | Yes |
@@ -30,8 +30,8 @@ The FluxVM hypervisor track (`backend: "flux-vm"`) is the AI-agent sandbox path.
 ## Remaining (optional hardening)
 
 - Production-grade in-tree KVM guests (virtio-blk from rootfs, vsock, snapshots without Firecracker)
-- Full eBPF TC programs beyond nftables + the TC stub script
 - Published density/cold-start numbers from your lab hardware
+- Cilium-native VM endpoints / identity-aware Hubble (beyond coexistence mode)
 
 ## Host config
 
@@ -42,6 +42,7 @@ fluxvm_engine = "firecracker"   # default
 
 [sandbox]
 http_proxy_default_port = 8080
+# dataplane.mode = "legacy"   # or "ebpf" / "cilium" — see docs/ebpf-cilium.md
 ```
 
 ## Where FluxVM is ahead or different

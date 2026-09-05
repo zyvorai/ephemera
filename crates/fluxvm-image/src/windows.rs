@@ -161,10 +161,7 @@ pub fn customize_windows_blocking(image: &Path, win: &WindowsCustomize) -> Resul
         inject_unattend(image, unattend)?;
     }
     if win.sysprep {
-        apply_plan(
-            image,
-            &sysprep_runonce_plan(image.display().to_string())?,
-        )?;
+        apply_plan(image, &sysprep_runonce_plan(image.display().to_string())?)?;
     }
 
     Ok(())
@@ -205,9 +202,8 @@ fn sysprep_runonce_plan(image: String) -> Result<FixPlan> {
     plan.overall_risk = "medium".into();
     plan.estimated_duration = "minutes".into();
     plan.metadata.author = "fluxvm".into();
-    plan.metadata.description = Some(
-        "Stage sysprep /generalize /oobe /shutdown on first boot via RunOnce".into(),
-    );
+    plan.metadata.description =
+        Some("Stage sysprep /generalize /oobe /shutdown on first boot via RunOnce".into());
     plan.add_operation(runonce_op(
         "FluxVMSysprep",
         r#"C:\Windows\System32\Sysprep\sysprep.exe /generalize /oobe /shutdown /quiet"#,

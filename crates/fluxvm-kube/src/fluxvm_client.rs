@@ -49,9 +49,10 @@ impl FluxVMClient {
                 "netns": spec.netns,
             }),
             "macvtap" => {
-                let parent = spec.parent.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!("networkMode macvtap requires spec.parent")
-                })?;
+                let parent = spec
+                    .parent
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("networkMode macvtap requires spec.parent"))?;
                 json!({
                     "mode": "macvtap",
                     "parent": parent,
@@ -59,9 +60,9 @@ impl FluxVMClient {
                     "mac": spec.mac,
                 })
             }
-            other => bail!(
-                "network_mode '{other}' is not supported (use none, user, tap, or macvtap)"
-            ),
+            other => {
+                bail!("network_mode '{other}' is not supported (use none, user, tap, or macvtap)")
+            }
         };
         let body = json!({
             "name": format!("dvm-{}", uuid_like_suffix()),

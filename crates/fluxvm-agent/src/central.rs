@@ -75,7 +75,11 @@ impl NodeInfo {
 
     /// Higher is better. Prefer residual capacity fraction; tie-break fewer
     /// VMs then lexicographic name (stable, deterministic).
-    fn capacity_score(&self, request_vcpus: u32, request_mem: u64) -> Option<(i64, i64, i64, String)> {
+    fn capacity_score(
+        &self,
+        request_vcpus: u32,
+        request_mem: u64,
+    ) -> Option<(i64, i64, i64, String)> {
         if !self.healthy() {
             return None;
         }
@@ -252,7 +256,10 @@ pub fn router(cfg: CentralConfig) -> Router {
         .route("/fleet/nodes", get(list_nodes))
         .route("/fleet/vms", post(create_vm).get(list_vms))
         .route("/fleet/vms/{node}/{id}", axum::routing::delete(delete_vm))
-        .layer(middleware::from_fn_with_state(fleet.clone(), auth_middleware))
+        .layer(middleware::from_fn_with_state(
+            fleet.clone(),
+            auth_middleware,
+        ))
         .with_state(fleet)
 }
 

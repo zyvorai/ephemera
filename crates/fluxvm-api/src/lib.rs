@@ -85,10 +85,7 @@ async fn auth_middleware(
         }) {
             Some(entry) => (
                 Some(entry.role),
-                entry
-                    .name
-                    .clone()
-                    .or_else(|| Some("unnamed".into())),
+                entry.name.clone().or_else(|| Some("unnamed".into())),
             ),
             None => (None, None),
         }
@@ -318,7 +315,9 @@ fn render_metrics(vms: &[VmRecord]) -> String {
         fluxvm_core::metrics::vm_create_duration_ms_total()
     ));
 
-    out.push_str("# HELP fluxvm_vm_start_total VM start (relaunch) operations completed successfully.\n");
+    out.push_str(
+        "# HELP fluxvm_vm_start_total VM start (relaunch) operations completed successfully.\n",
+    );
     out.push_str("# TYPE fluxvm_vm_start_total counter\n");
     out.push_str(&format!(
         "fluxvm_vm_start_total {}\n",

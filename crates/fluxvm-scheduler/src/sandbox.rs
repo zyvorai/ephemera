@@ -246,10 +246,7 @@ impl VmManager {
         let path = vm.workspace.join("sandbox-proxy.json");
         if let Ok(raw) = tokio::fs::read_to_string(&path).await {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
-                if let Some(p) = v
-                    .get("http_proxy_default_port")
-                    .and_then(|p| p.as_u64())
-                {
+                if let Some(p) = v.get("http_proxy_default_port").and_then(|p| p.as_u64()) {
                     return p as u16;
                 }
             }

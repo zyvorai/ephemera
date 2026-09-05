@@ -95,19 +95,8 @@ pub fn apply_egress_redirect(proxy_port: u16) -> anyhow::Result<()> {
     let _ = dataplane::remove_nft_table(table);
     dataplane::run_nft(&["add", "table", "inet", table])?;
     dataplane::run_nft(&[
-        "add",
-        "chain",
-        "inet",
-        table,
-        "output",
-        "{",
-        "type",
-        "nat",
-        "hook",
-        "output",
-        "priority",
-        "-100;",
-        "}",
+        "add", "chain", "inet", table, "output", "{", "type", "nat", "hook", "output", "priority",
+        "-100;", "}",
     ])?;
     dataplane::run_nft(&[
         "add",

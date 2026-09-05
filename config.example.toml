@@ -27,6 +27,18 @@ reaper_interval_secs = 5
 # templates_dir = "/var/lib/fluxvm/templates"
 # egress_proxy_listen = "127.0.0.1:18080"
 # http_proxy_default_port = 8080
+#
+# Native VM-edge dataplane. Defaults to `legacy`; use `ebpf` for standalone
+# hosts or `cilium` to require a Cilium node while keeping FluxVM pins/maps
+# isolated from Cilium internals. See docs/ebpf-cilium.md.
+# [sandbox.dataplane]
+# mode = "ebpf"                 # legacy | ebpf | cilium
+# bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
+# pin_root = "/sys/fs/bpf/fluxvm"
+# required = false              # true => fail VM start if eBPF cannot attach
+# default_allow = false
+# allow_cidrs = ["10.0.0.0/8", "192.0.2.0/24"]
+#
 # [[sandbox.credential_vault]]
 # host = "api.openai.com"
 # authorization = "Bearer REPLACE_ME"

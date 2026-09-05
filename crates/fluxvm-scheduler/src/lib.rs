@@ -135,7 +135,9 @@ fn validate_policy(req: &CreateVmRequest, cfg: &Config) -> Result<()> {
             fluxvm_core::model::NetworkSpec::Macvtap { .. } => "macvtap",
         };
         if !modes.iter().any(|m| m == mode) {
-            bail!("network mode '{mode}' is not permitted by policy allowed_network_modes {modes:?}");
+            bail!(
+                "network mode '{mode}' is not permitted by policy allowed_network_modes {modes:?}"
+            );
         }
     }
     if !p.allow_extra_args && !req.extra_args.is_empty() {
@@ -542,6 +544,7 @@ impl VmManager {
             // fluxvm_network::prepare has actually created the namespace
             // (see fluxvm_network::netns::NetnsHandle).
             let network = fluxvm_network::prepare(&self.cfg, id, &req.network).await?;
+            let dataplane_if = fluxvm_network::dataplane_interface(id, &network);
             record.tap_name = network.tap_name.clone();
             record.netns = network.netns.clone();
             record.dhcp_leasefile = network.dhcp_leasefile.clone();
@@ -619,11 +622,16 @@ impl VmManager {
                         .await
                     };
                     if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(
+                        &self.cfg,
                         id,
+                        dataplane_if.as_deref(),
                         &guest_cidr,
                         &allow_cidrs,
                     ) {
-                        tracing::warn!(vm = %id, error = %e, "nftables dataplane apply failed");
+                        if self.cfg.sandbox.dataplane.required {
+                            return Err(e).context("applying required VM dataplane");
+                        }
+                        tracing::warn!(vm = %id, error = %e, "VM dataplane apply failed");
                     }
                 }
             }
@@ -633,15 +641,14 @@ impl VmManager {
 
         if let Err(e) = result {
             if let Some(tap) = &record.tap_name {
-                let _ =
-                    fluxvm_network::cleanup(
-                        &self.cfg.state_dir,
-                        id,
-                        &req.network,
-                        tap,
-                        record.netns.as_deref(),
-                    )
-                    .await;
+                let _ = fluxvm_network::cleanup(
+                    &self.cfg.state_dir,
+                    id,
+                    &req.network,
+                    tap,
+                    record.netns.as_deref(),
+                )
+                .await;
             }
             // A later step (network prep, launch) can fail after the disk
             // was already provisioned — don't leak the LV/qemu-nbd process.
@@ -771,10 +778,16 @@ impl VmManager {
 
         let result: Result<()> = async {
             let network = fluxvm_network::prepare(&self.cfg, id, &vm.request.network).await?;
+            let dataplane_if = fluxvm_network::dataplane_interface(id, &network);
             vm.tap_name = network.tap_name.clone();
             vm.netns = network.netns.clone();
             vm.dhcp_leasefile = network.dhcp_leasefile.clone();
             vm.guest_ip = network.guest_ip.clone();
+
+            let guest_cidr_for_policy = network
+                .guest_cidr
+                .clone()
+                .or_else(|| vm.guest_ip.as_ref().map(|ip| format!("{ip}/32")));
 
             let vsock_socket = match (vm.guest_cid, vm.backend) {
                 (Some(_), BackendKind::Qemu) => None,
@@ -820,6 +833,30 @@ impl VmManager {
             Self::attach_cgroup(id, launch.pid, &mut vm);
             vm.status = VmStatus::Running;
             vm.error = None;
+            if vm.backend == BackendKind::FluxVm {
+                if let Some(guest_cidr) = guest_cidr_for_policy {
+                    let allow_cidrs = if self.cfg.sandbox.egress_allow_domains.is_empty() {
+                        vec![]
+                    } else {
+                        fluxvm_network::egress::resolve_allow_cidrs(
+                            &self.cfg.sandbox.egress_allow_domains,
+                        )
+                        .await
+                    };
+                    if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(
+                        &self.cfg,
+                        id,
+                        dataplane_if.as_deref(),
+                        &guest_cidr,
+                        &allow_cidrs,
+                    ) {
+                        if self.cfg.sandbox.dataplane.required {
+                            return Err(e).context("applying required VM dataplane");
+                        }
+                        tracing::warn!(vm = %id, error = %e, "VM dataplane apply failed");
+                    }
+                }
+            }
             Ok(())
         }
         .await;
@@ -868,15 +905,14 @@ impl VmManager {
             }
         }
         if let Some(tap) = &vm.tap_name {
-            let _ =
-                fluxvm_network::cleanup(
-                    &self.cfg.state_dir,
-                    id,
-                    &vm.request.network,
-                    tap,
-                    vm.netns.as_deref(),
-                )
-                .await;
+            let _ = fluxvm_network::cleanup(
+                &self.cfg.state_dir,
+                id,
+                &vm.request.network,
+                tap,
+                vm.netns.as_deref(),
+            )
+            .await;
         }
         vm.netns = None;
         // virtiofsd instances aren't reattachable the way qemu-nbd's export

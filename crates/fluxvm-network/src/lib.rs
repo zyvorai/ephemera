@@ -1,7 +1,9 @@
 // Copyright 2026 Zyvor
 // SPDX-License-Identifier: Apache-2.0
 
+pub mod cilium;
 pub mod dataplane;
+pub mod ebpf;
 pub mod egress;
 pub mod egress_proxy;
 pub mod ipam;
@@ -198,6 +200,17 @@ pub async fn prepare(cfg: &Config, id: Uuid, spec: &NetworkSpec) -> Result<Prepa
     }
 }
 
+/// Host-visible interface where VM-originated traffic enters the host.
+/// For a namespaced TAP this is the host side of the veth pair; for direct
+/// TAP/macvtap networking it is the device returned by `prepare`.
+pub fn dataplane_interface(id: Uuid, network: &PreparedNetwork) -> Option<String> {
+    if network.netns.is_some() {
+        Some(netns::host_veth_name(id))
+    } else {
+        network.tap_name.clone()
+    }
+}
+
 /// Opens the macvtap character device (`/dev/tap<ifindex>`) for `name`
 /// without O_CLOEXEC, so the fd survives exec into the spawned VMM and can
 /// be passed on the command line (`-netdev tap,fd=N` / `--net fd=N`).
@@ -227,6 +240,10 @@ pub async fn cleanup(
     tap_name: &str,
     netns_name: Option<&str>,
 ) -> Result<()> {
+    // Drop TC/eBPF pins and per-sandbox nftables before tearing down the
+    // host-visible interface the classifier was attached to.
+    let _ = dataplane::remove_sandbox_policy(id);
+
     // Deleting the namespace tears down everything inside it (the tap
     // included) — no separate tap cleanup needed, and calling
     // cleanup_tap/cleanup_macvtap for a namespaced tap would fail anyway
