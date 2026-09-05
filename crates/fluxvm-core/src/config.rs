@@ -154,6 +154,12 @@ pub struct DataplaneConfig {
     pub default_allow: bool,
     /// IPv4 destination CIDRs allowed by the native eBPF LPM trie.
     pub allow_cidrs: Vec<String>,
+    /// L4 allowlist entries (`tcp/443`, `udp/53`, …).
+    pub allow_ports: Vec<String>,
+    /// Allowed-flow ringbuf sampling: 0=off, N≈1/N packets.
+    pub sample_rate: u32,
+    /// Optional standalone node-ingress XDP guard (disabled with Cilium).
+    pub xdp: XdpConfig,
 }
 
 impl Default for DataplaneConfig {
@@ -165,6 +171,33 @@ impl Default for DataplaneConfig {
             required: false,
             default_allow: true,
             allow_cidrs: Vec::new(),
+            allow_ports: Vec::new(),
+            sample_rate: 0,
+            xdp: XdpConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct XdpConfig {
+    pub enabled: bool,
+    pub interface: Option<String>,
+    pub bpf_object: PathBuf,
+    pub pin_root: PathBuf,
+    pub required: bool,
+    pub block_cidrs: Vec<String>,
+}
+
+impl Default for XdpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interface: None,
+            bpf_object: "/usr/lib/fluxvm/bpf/fluxvm_xdp.bpf.o".into(),
+            pin_root: "/sys/fs/bpf/fluxvm".into(),
+            required: false,
+            block_cidrs: Vec::new(),
         }
     }
 }

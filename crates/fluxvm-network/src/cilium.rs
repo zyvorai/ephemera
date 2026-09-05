@@ -1,13 +1,11 @@
 // Copyright 2026 Zyvor
 // SPDX-License-Identifier: Apache-2.0
 
-//! Safe Cilium coexistence checks.
+//! Safe Cilium coexistence boundary.
 //!
-//! FluxVM intentionally does not write Cilium's private BPF maps. In
-//! `dataplane.mode = "cilium"`, Cilium remains the Kubernetes/node CNI and
-//! FluxVM attaches its own per-VM TC program only to the VM-edge interface,
-//! pinning maps under `/sys/fs/bpf/fluxvm`. This avoids depending on Cilium
-//! internal map layouts while allowing both dataplanes to coexist.
+//! FluxVM never writes Cilium's private BPF maps. Cilium owns Kubernetes
+//! node/CNI networking; FluxVM owns only the VM-edge TAP/veth program and
+//! pins its maps below `/sys/fs/bpf/fluxvm`.
 
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -16,16 +14,14 @@ pub fn validate_host() -> Result<()> {
     let socket = Path::new("/var/run/cilium/cilium.sock");
     if !socket.exists() {
         bail!(
-            "Cilium coexistence mode requested but {} is not visible; mount /var/run/cilium into the FluxVM container or install Cilium on the host",
+            "Cilium coexistence requested but {} is not visible; install Cilium or mount /var/run/cilium into FluxVM",
             socket.display()
         );
     }
-
     let bpffs = Path::new("/sys/fs/bpf");
     if !bpffs.exists() {
-        bail!("Cilium coexistence mode requires bpffs at /sys/fs/bpf");
+        bail!("Cilium coexistence requires bpffs at /sys/fs/bpf");
     }
-
     std::fs::metadata(bpffs).with_context(|| format!("reading {} metadata", bpffs.display()))?;
     Ok(())
 }

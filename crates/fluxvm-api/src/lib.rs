@@ -165,6 +165,12 @@ pub fn router(manager: Arc<VmManager>) -> Router {
         .route("/v1/vms/{id}/thaw", post(thaw_vm))
         .route("/v1/vms/{id}/frozen", get(vm_frozen))
         .route("/v1/vms/{id}/stats", get(vm_stats))
+        .route("/v1/vms/{id}/network/stats", get(vm_network_stats))
+        .route("/v1/vms/{id}/network/flows", get(vm_network_flows))
+        .route(
+            "/v1/vms/{id}/network/policy",
+            get(get_vm_network_policy).post(set_vm_network_policy),
+        )
         .route("/v1/vms/{id}/pressure", get(vm_pressure))
         .route("/v1/vms/{id}/logs", get(vm_logs))
         .route("/v1/vms/{id}/agent", post(agent_exec))
@@ -821,6 +827,47 @@ async fn vm_pressure(
     Ok(Json(json!(m.pressure(id).await?)))
 }
 
+async fn vm_network_stats(
+    State(m): State<Arc<VmManager>>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    Ok(Json(json!(m.network_stats(id).await?)))
+}
+
+#[derive(Debug, Deserialize)]
+struct NetworkFlowsQuery {
+    #[serde(default = "default_network_flow_limit")]
+    limit: usize,
+}
+fn default_network_flow_limit() -> usize {
+    100
+}
+
+async fn vm_network_flows(
+    State(m): State<Arc<VmManager>>,
+    Path(id): Path<Uuid>,
+    Query(q): Query<NetworkFlowsQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    Ok(Json(json!({"items": m.network_flows(id, q.limit).await?})))
+}
+
+async fn get_vm_network_policy(
+    State(m): State<Arc<VmManager>>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    Ok(Json(json!(m.network_policy(id).await?)))
+}
+
+async fn set_vm_network_policy(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+    Json(policy): Json<fluxvm_network::dataplane::VmNetworkPolicy>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_admin(role)?;
+    Ok(Json(json!(m.set_network_policy(id, policy).await?)))
+}
+
 async fn vm_cpuset(
     State(m): State<Arc<VmManager>>,
     Path(id): Path<Uuid>,
@@ -1466,6 +1513,7 @@ mod tests {
                     role: Role::Admin,
                     name: None,
                 }],
+                ..Default::default()
             };
             let app = router(manager(auth));
             assert_eq!(
@@ -1482,6 +1530,7 @@ mod tests {
                     role: Role::Admin,
                     name: None,
                 }],
+                ..Default::default()
             };
             let app = router(manager(auth));
             assert_eq!(
@@ -1498,6 +1547,7 @@ mod tests {
                     role: Role::Admin,
                     name: None,
                 }],
+                ..Default::default()
             };
             let app = router(manager(auth));
             assert_eq!(
@@ -1517,6 +1567,7 @@ mod tests {
                     role: Role::ReadOnly,
                     name: None,
                 }],
+                ..Default::default()
             };
             let app = router(manager(auth));
             assert_eq!(
@@ -1537,6 +1588,7 @@ mod tests {
                     role: Role::Admin,
                     name: None,
                 }],
+                ..Default::default()
             };
             let app = router(manager(auth));
             // The image path doesn't exist, so this fails downstream with

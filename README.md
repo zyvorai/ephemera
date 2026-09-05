@@ -146,6 +146,7 @@ Offline disk certify/repair stays in **[GuestKit](https://github.com/zyvorai/gue
 - [Important limitations in this MVP](#important-limitations-in-this-mvp)
 - [AI-agent sandbox gaps](docs/agent-sandbox-gaps.md)
 - [eBPF / Cilium dataplane](docs/ebpf-cilium.md)
+- [Network Fabric v1](docs/network-fabric.md)
 - [License](#license)
 
 ## Architecture
@@ -429,7 +430,7 @@ sudo ./scripts/test-network-namespace.sh --image /path/to/base.qcow2
 ## eBPF / Cilium sandbox dataplane
 
 FluxVM retains **nftables as the default** sandbox dataplane and adds an optional
-**native TC/eBPF** path for the FluxVm agent-sandbox track. Full detail:
+**native TC/eBPF** path for the FluxVm agent-sandbox track. Full detail: [docs/network-fabric.md](docs/network-fabric.md) and
 [docs/ebpf-cilium.md](docs/ebpf-cilium.md).
 
 ### Modes

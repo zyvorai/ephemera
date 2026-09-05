@@ -8,6 +8,7 @@ pub mod egress;
 pub mod egress_proxy;
 pub mod ipam;
 pub mod netns;
+pub mod xdp;
 
 use anyhow::{Context, Result, bail};
 use fluxvm_core::{
@@ -201,14 +202,22 @@ pub async fn prepare(cfg: &Config, id: Uuid, spec: &NetworkSpec) -> Result<Prepa
 }
 
 /// Host-visible interface where VM-originated traffic enters the host.
-/// For a namespaced TAP this is the host side of the veth pair; for direct
-/// TAP/macvtap networking it is the device returned by `prepare`.
-pub fn dataplane_interface(id: Uuid, network: &PreparedNetwork) -> Option<String> {
-    if network.netns.is_some() {
+/// Namespaced TAP uses the host side of the VM veth; direct TAP/macvtap uses
+/// the prepared host device. This is deterministic across stop/start.
+pub fn dataplane_interface_name(
+    id: Uuid,
+    has_netns: bool,
+    tap_name: Option<&str>,
+) -> Option<String> {
+    if has_netns {
         Some(netns::host_veth_name(id))
     } else {
-        network.tap_name.clone()
+        tap_name.map(str::to_string)
     }
+}
+
+pub fn dataplane_interface(id: Uuid, network: &PreparedNetwork) -> Option<String> {
+    dataplane_interface_name(id, network.netns.is_some(), network.tap_name.as_deref())
 }
 
 /// Opens the macvtap character device (`/dev/tap<ifindex>`) for `name`
@@ -240,9 +249,9 @@ pub async fn cleanup(
     tap_name: &str,
     netns_name: Option<&str>,
 ) -> Result<()> {
-    // Drop TC/eBPF pins and per-sandbox nftables before tearing down the
-    // host-visible interface the classifier was attached to.
-    let _ = dataplane::remove_sandbox_policy(id);
+    // Config-aware scheduler paths already remove native pins. This fallback
+    // catches default-path state after partial failures/crashes.
+    let _ = dataplane::remove_sandbox_policy_best_effort(id);
 
     // Deleting the namespace tears down everything inside it (the tap
     // included) — no separate tap cleanup needed, and calling

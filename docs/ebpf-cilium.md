@@ -8,7 +8,7 @@ nftables path as the **backwards-compatible default**.
 | Mode | Behavior |
 |------|----------|
 | `legacy` (default) | Existing per-sandbox nftables SNAT + optional destination allowlist. |
-| `ebpf` | Load FluxVM’s TC classifier (`bpf/fluxvm_tc.bpf.c`), pin programs/maps under `pin_root`, attach to the host-visible VM interface. |
+| `ebpf` | Load FluxVM’s TC classifier (`bpf/fluxvm_tc.bpf.c`), pin programs/maps under `pin_root`, attach to the host-visible VM interface. L4/ports, policy API, stats/flows, XDP: [network-fabric.md](network-fabric.md). |
 | `cilium` | Same FluxVM VM-edge eBPF path, but only after verifying the Cilium agent socket and bpffs are visible. **Never** writes Cilium private BPF maps. |
 
 Default remains `sandbox.dataplane.mode = "legacy"`. Existing configs that omit
@@ -49,6 +49,9 @@ Ownership boundary:
 3. Both may use bpffs; pin namespaces stay separate.
 4. A later launcher-pod/CNI change can make each VM a native Cilium identity
    (Hubble-aware) without replacing the native FluxVM dataplane API.
+
+For the full Network Fabric v1 surface (L4 ports, per-VM policy API, stats/flows,
+optional XDP guard), see [docs/network-fabric.md](network-fabric.md).
 
 ## Traffic path
 

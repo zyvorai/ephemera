@@ -28,17 +28,26 @@ reaper_interval_secs = 5
 # egress_proxy_listen = "127.0.0.1:18080"
 # http_proxy_default_port = 8080
 #
-# Native VM-edge dataplane. Defaults to `legacy` (nftables). Use `ebpf` for
-# standalone hosts or `cilium` to require a Cilium node while keeping FluxVM
-# pins/maps isolated from Cilium internals. Full write-up: docs/ebpf-cilium.md
-# and README "eBPF / Cilium sandbox dataplane".
+# Native VM-edge networking (Network Fabric v1). Defaults to legacy nftables.
+# See docs/network-fabric.md and docs/ebpf-cilium.md.
 # [sandbox.dataplane]
-# mode = "ebpf"                 # legacy | ebpf | cilium
+# mode = "ebpf"                         # legacy | ebpf | cilium
 # bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
 # pin_root = "/sys/fs/bpf/fluxvm"
-# required = false              # true => fail FluxVm start if eBPF cannot attach
-# default_allow = true          # false = deny-by-default for non-matching traffic
-# allow_cidrs = ["10.0.0.0/8", "192.0.2.0/24"]
+# required = false
+# default_allow = true
+# allow_cidrs = ["10.0.0.0/8"]
+# allow_ports = ["tcp/443", "udp/53"]
+# sample_rate = 100
+#
+# Standalone node-ingress XDP blocklist. Leave disabled with Cilium.
+# [sandbox.dataplane.xdp]
+# enabled = false
+# interface = "eno1"
+# bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_xdp.bpf.o"
+# pin_root = "/sys/fs/bpf/fluxvm"
+# required = false
+# block_cidrs = ["198.51.100.0/24"]
 #
 # [[sandbox.credential_vault]]
 # host = "api.openai.com"

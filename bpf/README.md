@@ -1,8 +1,7 @@
-# FluxVM TC classifier
+# FluxVM TC classifier / XDP objects
 
-Source for the optional native sandbox dataplane (`sandbox.dataplane.mode =
-"ebpf"` or `"cilium"`).
+- `fluxvm_tc.bpf.c` — VM-edge TC dataplane (`ebpf` / `cilium` modes)
+- `fluxvm_xdp.bpf.c` — optional node-ingress XDP blocklist
 
-- Build: `./scripts/build-ebpf.sh`
-- Docs: [docs/ebpf-cilium.md](../docs/ebpf-cilium.md)
-- README: [eBPF / Cilium sandbox dataplane](../README.md#ebpf--cilium-sandbox-dataplane)
+Build: `./scripts/build-ebpf.sh`  
+Docs: [docs/network-fabric.md](../docs/network-fabric.md), [docs/ebpf-cilium.md](../docs/ebpf-cilium.md)

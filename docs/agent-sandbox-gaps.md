@@ -21,7 +21,7 @@ The FluxVM hypervisor track (`backend: "flux-vm"`) is the AI-agent sandbox path.
 | **Multi-port proxy defaults** on sandbox create (`http_proxy_port(s)`) | Yes |
 | AutoPause + activity tracking + wake-on-request | Yes |
 | Egress allowlist + credential vault + live L7 proxy | Yes |
-| **Sandbox dataplane** — `legacy` nftables (default), `ebpf` TC classifier, `cilium` coexistence | Yes — [docs/ebpf-cilium.md](ebpf-cilium.md) |
+| **Sandbox dataplane** — `legacy` nftables (default), `ebpf` TC L3+L4, `cilium` coexistence, policy/stats/flows API, optional XDP | Yes — [docs/network-fabric.md](network-fabric.md) |
 | OCI → template export | Yes |
 | **Redis shared sandbox index** (`FLUXVM_SANDBOX_STATE_URL`) | Yes |
 | `/console` ops UI | Yes |

@@ -45,7 +45,7 @@ spec:
           command: ["fluxvm", "--config", "/etc/fluxvm.toml", "serve"]
           securityContext:
             capabilities:
-              add: ["NET_ADMIN", "SYS_ADMIN", "NET_BIND_SERVICE", "NET_RAW"]
+              add: ["NET_ADMIN", "SYS_ADMIN", "SYS_RESOURCE", "NET_BIND_SERVICE", "NET_RAW"]
               drop: ["ALL"]
           volumeMounts:
             - name: kvm
