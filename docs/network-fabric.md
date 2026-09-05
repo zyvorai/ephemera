@@ -48,6 +48,9 @@ The native program supports:
 
 - IPv4 destination CIDR allowlists through an LPM trie.
 - TCP/UDP destination-port allowlists through a hash map (`tcp/443`, `udp/53`).
+- Per-VM fixed-window egress **Mbps** and **PPS** ceilings (`max_egress_mbps`,
+  `max_egress_pps`) via the `fluxvm_rate` map — native eBPF only; no silent
+  nftables fallback when either is set.
 - CIDR **and** L4 policy together (both must match when both lists are non-empty).
 - deny-by-default with `default_allow = false`.
 - ARP and DHCP bootstrap traffic.
@@ -67,6 +70,7 @@ on apply failure the previous policy is restored.
 ```http
 GET  /v1/vms/<uuid>/network/policy
 POST /v1/vms/<uuid>/network/policy
+GET  /v1/vms/<uuid>/network/status
 ```
 
 Example POST body:
@@ -76,13 +80,22 @@ Example POST body:
   "default_allow": false,
   "allow_cidrs": ["10.20.0.0/16", "192.0.2.25/32"],
   "allow_ports": ["tcp/443", "udp/53"],
+  "max_egress_mbps": 100,
+  "max_egress_pps": 50000,
   "sample_rate": 100
 }
 ```
 
+Live `POST` updates keep the TC program attached and switch the interface to
+deny-all while maps are replaced, then publish the final config (fail-closed;
+never an allow-all gap). On apply failure the previous policy is restored.
+
 If both allow lists are non-empty, a packet must match an allowed destination
 CIDR and an allowed destination port. If neither list is set,
 `default_allow` decides the action.
+
+`GET …/network/status` reports mode, whether the TC filter is attached, iface,
+identity, pin directory, and effective policy.
 
 ### Stats + flow table
 
@@ -175,13 +188,20 @@ required = false               # true => VM creation/start fails if attach fails
 default_allow = false
 allow_cidrs = ["10.0.0.0/8"]
 allow_ports = ["tcp/443", "udp/53"]
+max_egress_mbps = 100          # native only; disables nftables fallback
+max_egress_pps = 50000
 sample_rate = 100              # 0 = off
 ```
 
-The default remains `mode = "legacy"`, so existing installations do not start
-loading eBPF merely by upgrading FluxVM. Native mode requires a Linux kernel
-with ring-buffer BPF maps (5.8+); when `required = false`, an unavailable BPF
-feature falls back to nftables rather than blocking VM startup.
+The default remains `mode = "legacy"`, so upgrades do not start loading eBPF
+unless configured. Native mode needs a Linux kernel with ring-buffer BPF maps
+(5.8+).
+
+Native attach can run on direct TAP/macvtap **without** a FluxVM-known guest IP;
+legacy nftables still needs a guest CIDR. When `required = false`, attach
+failures fall back to nftables unless rate limits are configured (those are
+native-only and fail closed). In `ebpf`/`cilium` mode, an exhausted fallback
+still aborts create/start.
 
 ### Memlock / systemd
 
@@ -222,9 +242,11 @@ BPF compilation and a real kernel attach smoke test:
 
 ```bash
 ./scripts/build-ebpf.sh
+./scripts/validate-network-fabric.sh
+FLUXVM_PRIVILEGED_SMOKE=1 ./scripts/validate-network-fabric.sh
+# or directly:
 sudo -E ./scripts/test-ebpf-smoke.sh
-# or with installed objects:
-# sudo -E ./scripts/test-ebpf-smoke.sh /usr/lib/fluxvm/bpf
+sudo -E ./scripts/test-network-fabric.sh
 ```
 
 `scripts/test-ebpf-smoke.sh` creates **two network namespaces** and a veth pair
@@ -232,8 +254,12 @@ so traffic truly crosses the wire (same-netns `ping -I` is unreliable when the
 destination is also a local address). All `bpftool` / `tc` / bpffs work runs in
 **one persistent `ip netns exec` session** — on many hosts, separate
 `ip netns exec` invocations remount `/sys` and drop custom bpffs mounts under
-`/sys/fs/bpf`. The smoke covers TC allow/deny/LPM, stats/flows map dumps, and
-XDP blocklist attach/detach.
+`/sys/fs/bpf`. The smoke covers TC allow/deny/LPM, **PPS rate limiting**,
+stats/flows map dumps, and XDP blocklist attach/detach.
+
+`scripts/test-network-fabric.sh` is the full e2e: unit tests, kernel smoke,
+FluxVm create with `tap`+`netns`, TC attach, REST
+`policy`/`status`/`stats`/`flows`, live reconfigure with Mbps/PPS, and teardown.
 
 The `Network Fabric` GitHub Actions workflow runs the above on PRs that touch
 the networking implementation.

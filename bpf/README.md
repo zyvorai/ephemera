@@ -1,7 +1,7 @@
 # FluxVM TC classifier / XDP objects
 
 - `fluxvm_tc.bpf.c` — VM-edge TC dataplane (`ebpf` / `cilium` modes): L3+L4
-  allowlists, stats, flows, sampled events
+  allowlists, Mbps/PPS rate limits, stats, flows, sampled events
 - `fluxvm_xdp.bpf.c` — optional node-ingress XDP source-CIDR blocklist
   (disabled by default; refused in `cilium` mode)
 
@@ -12,10 +12,11 @@ Build:
 # outputs: dist/bpf/fluxvm_tc.bpf.o  dist/bpf/fluxvm_xdp.bpf.o
 ```
 
-Kernel smoke (dual netns; needs root + bpftool/tc):
+Validate (syntax + optional build/tests/smoke):
 
 ```bash
-sudo -E ../scripts/test-ebpf-smoke.sh
+../scripts/validate-network-fabric.sh
+FLUXVM_PRIVILEGED_SMOKE=1 ../scripts/validate-network-fabric.sh
 ```
 
 Docs: [docs/network-fabric.md](../docs/network-fabric.md),

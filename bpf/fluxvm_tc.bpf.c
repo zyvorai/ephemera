@@ -28,6 +28,11 @@ struct iface_config {
     __u32 enforce_l4;
     // 0 = do not sample allowed flows; N = emit roughly 1/N allows.
     __u32 sample_rate;
+    __u32 pad;
+    // Zero disables the corresponding limiter. Userspace converts Mbps to
+    // bytes/second before writing this structure.
+    __u64 rate_bytes_per_sec;
+    __u64 rate_packets_per_sec;
 };
 
 // LPM prefix covers an exact 32-bit FluxVM identity followed by an IPv4
@@ -75,6 +80,14 @@ struct flow_value {
     __u64 last_seen_ns;
 };
 
+struct rate_state {
+    struct bpf_spin_lock lock;
+    __u32 pad;
+    __u64 window_start_ns;
+    __u64 bytes;
+    __u64 packets;
+};
+
 struct flow_event {
     __u64 timestamp_ns;
     __u32 identity;
@@ -110,6 +123,13 @@ struct {
     __type(key, struct l4_key);
     __type(value, __u32);
 } fluxvm_l4 SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 8);
+    __type(key, __u32);
+    __type(value, struct rate_state);
+} fluxvm_rate SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
@@ -188,6 +208,51 @@ static __always_inline int is_dhcp(__u8 protocol, __u16 sport, __u16 dport)
     if (protocol != IPPROTO_UDP)
         return 0;
     return (sport == 67 && dport == 68) || (sport == 68 && dport == 67);
+}
+
+#define FLUXVM_RATE_WINDOW_NS 1000000000ULL
+
+static __always_inline int rate_allowed(
+    const struct iface_config *cfg,
+    __u32 bytes)
+{
+    __u64 byte_limit = cfg->rate_bytes_per_sec;
+    __u64 packet_limit = cfg->rate_packets_per_sec;
+    if (byte_limit == 0 && packet_limit == 0)
+        return 1;
+
+    __u32 identity = cfg->identity;
+    struct rate_state *state = bpf_map_lookup_elem(&fluxvm_rate, &identity);
+    // Userspace creates the state before enabling limits in iface_config.
+    // Missing state therefore means an incomplete configuration: fail closed.
+    if (!state)
+        return 0;
+
+    __u64 now = bpf_ktime_get_ns();
+    int allowed = 1;
+    bpf_spin_lock(&state->lock);
+
+    if (state->window_start_ns == 0 ||
+        now - state->window_start_ns >= FLUXVM_RATE_WINDOW_NS) {
+        state->window_start_ns = now;
+        state->bytes = 0;
+        state->packets = 0;
+    }
+
+    if (byte_limit > 0) {
+        if (state->bytes >= byte_limit ||
+            (__u64)bytes > byte_limit - state->bytes)
+            allowed = 0;
+    }
+    if (packet_limit > 0 && state->packets >= packet_limit)
+        allowed = 0;
+
+    if (allowed) {
+        state->bytes += bytes;
+        state->packets += 1;
+    }
+    bpf_spin_unlock(&state->lock);
+    return allowed;
 }
 
 static __always_inline int cidr_allowed(__u32 identity, __u32 daddr)
@@ -346,6 +411,9 @@ int fluxvm_egress(struct __sk_buff *skb)
         int port_ok = parsed_l4 > 0 && l4_allowed(cfg->identity, iph->protocol, dport);
         allowed = allowed && port_ok;
     }
+
+    if (allowed && !rate_allowed(cfg, skb->len))
+        allowed = 0;
 
     __u8 verdict = allowed ? FLUXVM_VERDICT_ALLOW : FLUXVM_VERDICT_DROP;
     count(cfg->identity, verdict, skb->len);

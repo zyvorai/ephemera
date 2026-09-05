@@ -37,8 +37,9 @@ The FluxVM hypervisor track (`backend: "flux-vm"`) is the AI-agent sandbox path.
   `/run/fluxvm/xdp/`) — disabled by default and refused in `cilium` mode.
 - **`cilium`:** same FluxVM edge attach after verifying `/var/run/cilium/cilium.sock` +
   bpffs; **does not** write Cilium private maps (coexistence, not Cilium endpoint identity).
-- **REST:** `GET/POST /v1/vms/{id}/network/policy`, `GET …/stats`, `GET …/flows`
-  (native modes only; `POST` needs admin when auth is enabled).
+- **REST:** `GET/POST /v1/vms/{id}/network/policy`, `GET …/status`, `GET …/stats`,
+  `GET …/flows` (native modes only; `POST` needs admin when auth is enabled).
+- **v2:** Mbps/PPS limits, fail-closed live reconfigure, attach without guest IP.
 
 Applied on FluxVm create/start/restart when a guest CIDR is known. See
 [network-fabric.md](network-fabric.md) and README
@@ -68,6 +69,8 @@ http_proxy_default_port = 8080
 # default_allow = true
 # allow_cidrs = ["10.0.0.0/8"]
 # allow_ports = ["tcp/443", "udp/53"]
+# max_egress_mbps = 100
+# max_egress_pps = 50000
 # sample_rate = 100             # 0 = off
 # [sandbox.dataplane.xdp]       # leave disabled with mode = "cilium"
 # enabled = false

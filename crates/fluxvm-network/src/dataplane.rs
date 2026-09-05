@@ -27,6 +27,11 @@ pub struct VmNetworkPolicy {
     /// Entries are `tcp/443`, `udp/53`, etc. If CIDRs and ports are both
     /// configured, a packet must match both dimensions.
     pub allow_ports: Vec<String>,
+    /// Optional fixed-window egress bandwidth ceiling. Native eBPF only.
+    /// `1` means 1 megabit/second (125,000 bytes/second).
+    pub max_egress_mbps: Option<u32>,
+    /// Optional fixed-window packet-rate ceiling. Native eBPF only.
+    pub max_egress_pps: Option<u32>,
     /// 0 disables allow-event sampling. N emits about 1/N allowed packets
     /// to the BPF ring buffer; drop flows are always represented in maps.
     pub sample_rate: u32,
@@ -38,6 +43,8 @@ impl Default for VmNetworkPolicy {
             default_allow: true,
             allow_cidrs: Vec::new(),
             allow_ports: Vec::new(),
+            max_egress_mbps: None,
+            max_egress_pps: None,
             sample_rate: 0,
         }
     }
@@ -49,6 +56,8 @@ pub fn default_policy(cfg: &Config) -> VmNetworkPolicy {
         default_allow: dp.default_allow,
         allow_cidrs: dp.allow_cidrs.clone(),
         allow_ports: dp.allow_ports.clone(),
+        max_egress_mbps: dp.max_egress_mbps,
+        max_egress_pps: dp.max_egress_pps,
         sample_rate: dp.sample_rate,
     }
 }
@@ -103,7 +112,7 @@ pub fn apply_sandbox_policy(
     cfg: &Config,
     id: Uuid,
     iface: Option<&str>,
-    guest_cidr: &str,
+    guest_cidr: Option<&str>,
     extra_allow_cidrs: &[String],
 ) -> Result<()> {
     let dp = &cfg.sandbox.dataplane;
@@ -113,7 +122,10 @@ pub fn apply_sandbox_policy(
     policy.allow_cidrs.dedup();
 
     match dp.mode {
-        DataplaneMode::Legacy => apply_nftables(id, guest_cidr, &policy),
+        DataplaneMode::Legacy => match guest_cidr {
+            Some(cidr) => apply_nftables(id, cidr, &policy),
+            None => Ok(()),
+        },
         DataplaneMode::Ebpf | DataplaneMode::Cilium => {
             let native = (|| -> Result<()> {
                 if dp.mode == DataplaneMode::Cilium {
@@ -125,18 +137,102 @@ pub fn apply_sandbox_policy(
 
             match native {
                 Ok(()) => Ok(()),
-                Err(e) if dp.required => Err(e),
+                Err(e) if dp.required || policy_uses_native_only_features(&policy) => Err(e),
                 Err(e) => {
                     warn!(
                         %id,
                         error = %e,
                         "native eBPF dataplane unavailable; falling back to nftables"
                     );
-                    apply_nftables(id, guest_cidr, &policy)
+                    match guest_cidr {
+                        Some(cidr) => apply_nftables(id, cidr, &policy),
+                        None => Err(e).context(
+                            "native eBPF dataplane failed and nftables fallback needs a known guest CIDR",
+                        ),
+                    }
                 }
             }
         }
     }
+}
+
+/// Update policy for a running VM. Native eBPF updates maps in-place while
+/// leaving the TC program attached; the kernel is switched to deny-all while
+/// maps are being replaced so the update cannot create an allow-all gap.
+pub fn reconfigure_sandbox_policy(
+    cfg: &Config,
+    id: Uuid,
+    guest_cidr: Option<&str>,
+    extra_allow_cidrs: &[String],
+) -> Result<()> {
+    let dp = &cfg.sandbox.dataplane;
+    let mut policy = effective_policy(cfg, id)?;
+    policy.allow_cidrs.extend_from_slice(extra_allow_cidrs);
+    policy.allow_cidrs.sort();
+    policy.allow_cidrs.dedup();
+
+    match dp.mode {
+        DataplaneMode::Legacy => {
+            let cidr = guest_cidr
+                .context("legacy nftables policy update requires a FluxVM-known guest CIDR")?;
+            apply_nftables(id, cidr, &policy)
+        }
+        DataplaneMode::Ebpf | DataplaneMode::Cilium => {
+            if dp.mode == DataplaneMode::Cilium {
+                crate::cilium::validate_host()?;
+            }
+            crate::ebpf::reconfigure(dp, &policy, id)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DataplaneStatus {
+    pub mode: String,
+    pub required: bool,
+    pub attached: bool,
+    pub interface: Option<String>,
+    pub identity: u32,
+    pub pin_dir: Option<String>,
+    pub policy: VmNetworkPolicy,
+}
+
+pub fn status(cfg: &Config, id: Uuid) -> Result<DataplaneStatus> {
+    let dp = &cfg.sandbox.dataplane;
+    let policy = effective_policy(cfg, id)?;
+    let mode = match dp.mode {
+        DataplaneMode::Legacy => "legacy",
+        DataplaneMode::Ebpf => "ebpf",
+        DataplaneMode::Cilium => "cilium",
+    }
+    .to_string();
+
+    if dp.mode == DataplaneMode::Legacy {
+        return Ok(DataplaneStatus {
+            mode,
+            required: dp.required,
+            attached: false,
+            interface: None,
+            identity: crate::ebpf::identity_for(id),
+            pin_dir: None,
+            policy,
+        });
+    }
+
+    let native = crate::ebpf::attachment_status(dp, id)?;
+    Ok(DataplaneStatus {
+        mode,
+        required: dp.required,
+        attached: native.attached,
+        interface: native.interface,
+        identity: native.identity,
+        pin_dir: Some(native.pin_dir),
+        policy,
+    })
+}
+
+fn policy_uses_native_only_features(policy: &VmNetworkPolicy) -> bool {
+    policy.max_egress_mbps.is_some() || policy.max_egress_pps.is_some()
 }
 
 pub fn remove_sandbox_policy(cfg: &Config, id: Uuid) -> Result<()> {
@@ -208,6 +304,11 @@ pub fn apply_subnet_masquerade(table: &str, source_cidr: &str) -> Result<()> {
 }
 
 fn apply_nftables(id: Uuid, guest_cidr: &str, policy: &VmNetworkPolicy) -> Result<()> {
+    if policy_uses_native_only_features(policy) {
+        anyhow::bail!(
+            "max_egress_mbps/max_egress_pps require sandbox.dataplane.mode=ebpf or cilium"
+        );
+    }
     let table = format!("fluxvm_{}", id.simple());
     apply_subnet_masquerade(&table, guest_cidr)?;
 
@@ -274,6 +375,8 @@ fn apply_nftables(id: Uuid, guest_cidr: &str, policy: &VmNetworkPolicy) -> Resul
         %guest_cidr,
         cidrs = policy.allow_cidrs.len(),
         ports = policy.allow_ports.len(),
+        max_egress_mbps = ?policy.max_egress_mbps,
+        max_egress_pps = ?policy.max_egress_pps,
         default_allow = policy.default_allow,
         "applied nftables sandbox policy"
     );
@@ -348,6 +451,8 @@ mod tests {
             default_allow: false,
             allow_cidrs: vec!["10.0.0.0/8".into()],
             allow_ports: vec!["tcp/443".into()],
+            max_egress_mbps: Some(100),
+            max_egress_pps: Some(50_000),
             sample_rate: 10,
         };
         save_policy(&cfg, id, &policy).unwrap();

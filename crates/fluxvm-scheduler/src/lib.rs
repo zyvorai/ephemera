@@ -458,49 +458,49 @@ impl VmManager {
         fluxvm_network::dataplane::save_policy(&self.cfg, id, &policy)?;
 
         if vm.status == VmStatus::Running && vm.backend == BackendKind::FluxVm {
-            if let Some(ip) = vm.guest_ip.as_deref() {
-                let guest_cidr = format!("{ip}/32");
-                let iface = fluxvm_network::dataplane_interface_name(
-                    id,
-                    vm.netns.is_some(),
-                    vm.tap_name.as_deref(),
-                );
-                let extra = if self.cfg.sandbox.egress_allow_domains.is_empty() {
-                    vec![]
-                } else {
-                    fluxvm_network::egress::resolve_allow_cidrs(
-                        &self.cfg.sandbox.egress_allow_domains,
-                    )
+            let guest_cidr = vm.guest_ip.as_deref().map(|ip| format!("{ip}/32"));
+            let extra = if self.cfg.sandbox.egress_allow_domains.is_empty() {
+                vec![]
+            } else {
+                fluxvm_network::egress::resolve_allow_cidrs(&self.cfg.sandbox.egress_allow_domains)
                     .await
-                };
-                if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(
+            };
+            if let Err(e) = fluxvm_network::dataplane::reconfigure_sandbox_policy(
+                &self.cfg,
+                id,
+                guest_cidr.as_deref(),
+                &extra,
+            ) {
+                // Atomic control-plane semantics: restore prior policy on failure.
+                match previous.as_ref() {
+                    Some(old) => {
+                        let _ = fluxvm_network::dataplane::save_policy(&self.cfg, id, old);
+                    }
+                    None => {
+                        let _ = fluxvm_network::dataplane::delete_policy(&self.cfg, id);
+                    }
+                }
+                let _ = fluxvm_network::dataplane::reconfigure_sandbox_policy(
                     &self.cfg,
                     id,
-                    iface.as_deref(),
-                    &guest_cidr,
+                    guest_cidr.as_deref(),
                     &extra,
-                ) {
-                    // Atomic control-plane semantics: restore prior policy on failure.
-                    match previous.as_ref() {
-                        Some(old) => {
-                            let _ = fluxvm_network::dataplane::save_policy(&self.cfg, id, old);
-                        }
-                        None => {
-                            let _ = fluxvm_network::dataplane::delete_policy(&self.cfg, id);
-                        }
-                    }
-                    let _ = fluxvm_network::dataplane::apply_sandbox_policy(
-                        &self.cfg,
-                        id,
-                        iface.as_deref(),
-                        &guest_cidr,
-                        &extra,
-                    );
-                    return Err(e).context("applying updated VM network policy");
-                }
+                );
+                return Err(e).context("applying updated VM network policy");
             }
         }
         Ok(policy)
+    }
+
+    pub async fn network_status(
+        &self,
+        id: Uuid,
+    ) -> Result<fluxvm_network::dataplane::DataplaneStatus> {
+        self.get(id).await?;
+        let cfg = self.cfg.clone();
+        tokio::task::spawn_blocking(move || fluxvm_network::dataplane::status(&cfg, id))
+            .await
+            .context("network status reader panicked")?
     }
 
     pub async fn network_stats(
@@ -674,27 +674,28 @@ impl VmManager {
                 .or_else(|| record.guest_ip.as_ref().map(|ip| format!("{ip}/32")));
 
             if req.backend == BackendKind::FluxVm {
-                if let Some(guest_cidr) = guest_cidr_for_policy.as_deref() {
-                    let allow_cidrs = if self.cfg.sandbox.egress_allow_domains.is_empty() {
-                        vec![]
-                    } else {
-                        fluxvm_network::egress::resolve_allow_cidrs(
-                            &self.cfg.sandbox.egress_allow_domains,
-                        )
-                        .await
-                    };
-                    if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(
-                        &self.cfg,
-                        id,
-                        dataplane_if.as_deref(),
-                        guest_cidr,
-                        &allow_cidrs,
-                    ) {
-                        if self.cfg.sandbox.dataplane.required {
-                            return Err(e).context("applying required VM dataplane before launch");
-                        }
-                        tracing::warn!(vm = %id, error = %e, "VM dataplane apply failed");
+                let allow_cidrs = if self.cfg.sandbox.egress_allow_domains.is_empty() {
+                    vec![]
+                } else {
+                    fluxvm_network::egress::resolve_allow_cidrs(
+                        &self.cfg.sandbox.egress_allow_domains,
+                    )
+                    .await
+                };
+                if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(
+                    &self.cfg,
+                    id,
+                    dataplane_if.as_deref(),
+                    guest_cidr_for_policy.as_deref(),
+                    &allow_cidrs,
+                ) {
+                    if self.cfg.sandbox.dataplane.required
+                        || self.cfg.sandbox.dataplane.mode
+                            != fluxvm_core::config::DataplaneMode::Legacy
+                    {
+                        return Err(e).context("applying VM dataplane before launch");
                     }
+                    tracing::warn!(vm = %id, error = %e, "VM dataplane apply failed");
                 }
             }
 
@@ -900,27 +901,28 @@ impl VmManager {
                 (vm.request.storage == StorageBackend::Nbd).then(|| vm.workspace.join("nbd.sock"));
 
             if vm.backend == BackendKind::FluxVm {
-                if let Some(guest_cidr) = guest_cidr_for_policy.as_deref() {
-                    let allow_cidrs = if self.cfg.sandbox.egress_allow_domains.is_empty() {
-                        vec![]
-                    } else {
-                        fluxvm_network::egress::resolve_allow_cidrs(
-                            &self.cfg.sandbox.egress_allow_domains,
-                        )
-                        .await
-                    };
-                    if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(
-                        &self.cfg,
-                        id,
-                        dataplane_if.as_deref(),
-                        guest_cidr,
-                        &allow_cidrs,
-                    ) {
-                        if self.cfg.sandbox.dataplane.required {
-                            return Err(e).context("applying required VM dataplane before restart");
-                        }
-                        tracing::warn!(vm = %id, error = %e, "VM dataplane re-apply failed");
+                let allow_cidrs = if self.cfg.sandbox.egress_allow_domains.is_empty() {
+                    vec![]
+                } else {
+                    fluxvm_network::egress::resolve_allow_cidrs(
+                        &self.cfg.sandbox.egress_allow_domains,
+                    )
+                    .await
+                };
+                if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(
+                    &self.cfg,
+                    id,
+                    dataplane_if.as_deref(),
+                    guest_cidr_for_policy.as_deref(),
+                    &allow_cidrs,
+                ) {
+                    if self.cfg.sandbox.dataplane.required
+                        || self.cfg.sandbox.dataplane.mode
+                            != fluxvm_core::config::DataplaneMode::Legacy
+                    {
+                        return Err(e).context("applying VM dataplane before restart");
                     }
+                    tracing::warn!(vm = %id, error = %e, "VM dataplane re-apply failed");
                 }
             }
 

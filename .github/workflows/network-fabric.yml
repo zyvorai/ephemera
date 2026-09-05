@@ -10,6 +10,8 @@ name: Network Fabric
       - 'crates/fluxvm-api/**'
       - 'scripts/build-ebpf.sh'
       - 'scripts/test-ebpf-smoke.sh'
+      - 'scripts/test-network-fabric.sh'
+      - 'scripts/validate-network-fabric.sh'
       - 'deploy/k8s/**'
       - '.github/workflows/network-fabric.yml'
   push:
@@ -20,6 +22,10 @@ name: Network Fabric
       - 'crates/fluxvm-core/**'
       - 'crates/fluxvm-scheduler/**'
       - 'crates/fluxvm-api/**'
+      - 'scripts/build-ebpf.sh'
+      - 'scripts/test-ebpf-smoke.sh'
+      - 'scripts/test-network-fabric.sh'
+      - 'scripts/validate-network-fabric.sh'
 
 jobs:
   build-test:

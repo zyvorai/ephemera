@@ -449,10 +449,11 @@ Backwards compatibility: configs without `[sandbox.dataplane]` keep `legacy` / n
 - Ships a real TC classifier (`bpf/fluxvm_tc.bpf.c`) plus optional XDP guard (`bpf/fluxvm_xdp.bpf.c`), built by `./scripts/build-ebpf.sh`
 - Pins per-VM programs/maps under `/sys/fs/bpf/fluxvm/vms/<uuid>/`
 - Stores detach metadata under `/run/fluxvm/ebpf/` (bpffs cannot hold regular files); XDP markers under `/run/fluxvm/xdp/`
-- L3 (CIDR) + L4 (`tcp/443`, `udp/53`) allowlists; ARP/DHCP always allowed
+- L3 (CIDR) + L4 (`tcp/443`, `udp/53`) allowlists; optional Mbps/PPS egress limits; ARP/DHCP always allowed
 - Allow/drop counters, LRU flows, drop/sampled-allow ring buffer (`sample_rate`; `0` = off)
-- REST: `GET/POST /v1/vms/{id}/network/policy`, `GET …/stats`, `GET …/flows` (`POST` needs admin when auth is on)
-- Attach: host veth for `netns: true`, else TAP/macvtap device name
+- REST: `GET/POST /v1/vms/{id}/network/policy`, `GET …/status`, `GET …/stats`, `GET …/flows` (`POST` needs admin when auth is on)
+- Live policy updates reconfigure maps in place (deny-all window; never allow-all gap)
+- Attach: host veth for `netns: true`, else TAP/macvtap (native path does not require a known guest IP)
 - Tears BPF state down on VM network cleanup
 - Falls back to nftables unless `sandbox.dataplane.required = true`
 - Container image installs both `.o` files; DaemonSet mounts bpffs + `/var/run/cilium`; systemd sets `LimitMEMLOCK=infinity`
@@ -500,6 +501,8 @@ required = false              # true => fail FluxVm create/start if attach fails
 default_allow = true
 allow_cidrs = ["10.0.0.0/8"]
 allow_ports = ["tcp/443", "udp/53"]
+max_egress_mbps = 100             # native only
+max_egress_pps = 50000
 sample_rate = 100             # 0 = off
 
 # Optional node-ingress XDP (leave disabled with mode = "cilium")
@@ -517,13 +520,13 @@ On a Cilium node, prefer `mode = "cilium"` and `required = true` once bpffs and
 ```bash
 cargo test -p fluxvm-network
 ./scripts/build-ebpf.sh
-sudo -E ./scripts/test-ebpf-smoke.sh
+./scripts/validate-network-fabric.sh
+FLUXVM_PRIVILEGED_SMOKE=1 ./scripts/validate-network-fabric.sh
 ```
 
 The smoke uses dual netns and one persistent `ip netns exec` session (bpffs mounts
-under `/sys` do not survive separate netns execs on many hosts). Then boot a FluxVm
-VM with `network.mode=tap` + `netns=true`, check `tc filter show dev vh<short-id> ingress`,
-inspect pins under `/sys/fs/bpf/fluxvm/vms/…`, and confirm delete removes filters and pins.
+under `/sys` do not survive separate netns execs on many hosts), and covers PPS
+rate limiting plus XDP.
 
 ## Create a QEMU disposable VM
 
@@ -613,6 +616,7 @@ Useful routes once `fluxvm serve` is up:
 | `ANY /v1/sandboxes/{id}/http/{port}/{*path}` | Reverse-proxy into guest (AutoResume) |
 | `ANY /sandbox/{id}/{*path}` | Same proxy, default guest port 8080 |
 | `GET/POST /v1/vms/{id}/network/policy` | Per-VM dataplane policy (Network Fabric) |
+| `GET /v1/vms/{id}/network/status` | Attach status + effective policy |
 | `GET /v1/vms/{id}/network/stats` · `…/flows` | eBPF counters / flow table |
 | `GET /console` | Lightweight ops UI |
 

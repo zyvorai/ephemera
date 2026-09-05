@@ -38,6 +38,8 @@ reaper_interval_secs = 5
 # default_allow = true
 # allow_cidrs = ["10.0.0.0/8"]
 # allow_ports = ["tcp/443", "udp/53"]
+# max_egress_mbps = 100                 # native eBPF only; no nftables fallback
+# max_egress_pps = 50000                # native eBPF only
 # sample_rate = 100                     # 0 = off; N ≈ 1/N allowed-flow samples
 #
 # Standalone node-ingress XDP blocklist. Leave disabled with Cilium

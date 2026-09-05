@@ -62,6 +62,14 @@ pub struct FlowRecord {
     pub last_seen_ns: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NativeAttachmentStatus {
+    pub attached: bool,
+    pub interface: Option<String>,
+    pub identity: u32,
+    pub pin_dir: String,
+}
+
 pub fn apply(cfg: &DataplaneConfig, policy: &VmNetworkPolicy, id: Uuid, iface: &str) -> Result<()> {
     if iface.is_empty() {
         bail!("cannot attach eBPF dataplane without a host-visible interface");
@@ -138,22 +146,7 @@ pub fn apply(cfg: &DataplaneConfig, policy: &VmNetworkPolicy, id: Uuid, iface: &
 
         let ifindex = read_ifindex(iface)?;
         let identity = identity_for(id);
-        update_iface_config(
-            &map_dir.join("fluxvm_id"),
-            ifindex,
-            identity,
-            policy.default_allow,
-            !policy.allow_cidrs.is_empty(),
-            !policy.allow_ports.is_empty(),
-            policy.sample_rate,
-        )?;
-
-        for cidr in &policy.allow_cidrs {
-            update_ipv4_allow(&map_dir.join("fluxvm_v4"), identity, parse_ipv4_cidr(cidr)?)?;
-        }
-        for rule in &policy.allow_ports {
-            update_l4_allow(&map_dir.join("fluxvm_l4"), identity, parse_port_rule(rule)?)?;
-        }
+        configure_maps(&map_dir, ifindex, identity, policy, false)?;
 
         info!(
             %id,
@@ -162,6 +155,8 @@ pub fn apply(cfg: &DataplaneConfig, policy: &VmNetworkPolicy, id: Uuid, iface: &
             default_allow = policy.default_allow,
             cidrs = policy.allow_cidrs.len(),
             ports = policy.allow_ports.len(),
+            max_egress_mbps = ?policy.max_egress_mbps,
+            max_egress_pps = ?policy.max_egress_pps,
             sample_rate = policy.sample_rate,
             "attached FluxVM native eBPF dataplane"
         );
@@ -175,12 +170,7 @@ pub fn apply(cfg: &DataplaneConfig, policy: &VmNetworkPolicy, id: Uuid, iface: &
 }
 
 pub fn remove(cfg: &DataplaneConfig, id: Uuid) -> Result<()> {
-    detach_tc_filter(id);
-    let pin = vm_pin_dir(&cfg.pin_root, id);
-    if pin.exists() {
-        fs::remove_dir_all(&pin)
-            .with_context(|| format!("removing eBPF pin dir {}", pin.display()))?;
-    }
+    remove_vm_dir(&vm_pin_dir(&cfg.pin_root, id), id)?;
     let meta = vm_meta_dir(id);
     if meta.exists() {
         let _ = fs::remove_dir_all(&meta);
@@ -188,11 +178,58 @@ pub fn remove(cfg: &DataplaneConfig, id: Uuid) -> Result<()> {
     Ok(())
 }
 
+/// Update a running VM in place. The TC program stays attached for the whole
+/// operation. We first switch its interface config to deny-all, then replace
+/// policy maps, then publish the final config. A failed update therefore
+/// creates at worst a short over-deny window, never an allow-all gap.
+pub fn reconfigure(cfg: &DataplaneConfig, policy: &VmNetworkPolicy, id: Uuid) -> Result<()> {
+    require_bpftool()?;
+    require_tc()?;
+    validate_policy(policy)?;
+    let vm_dir = vm_pin_dir(&cfg.pin_root, id);
+    let map_dir = vm_dir.join("maps");
+    let prog_pin = vm_dir.join("progs/fluxvm_egress");
+    if !prog_pin.exists() {
+        bail!("FluxVM eBPF program is not attached for VM {id}");
+    }
+    let iface = read_recorded_iface(id).context("reading VM eBPF interface marker")?;
+    let ifindex = read_ifindex(&iface)?;
+    let identity = identity_for(id);
+    configure_maps(&map_dir, ifindex, identity, policy, true)?;
+    info!(
+        %id,
+        %iface,
+        identity,
+        cidrs = policy.allow_cidrs.len(),
+        ports = policy.allow_ports.len(),
+        max_egress_mbps = ?policy.max_egress_mbps,
+        max_egress_pps = ?policy.max_egress_pps,
+        "updated FluxVM eBPF policy in place"
+    );
+    Ok(())
+}
+
+pub fn attachment_status(cfg: &DataplaneConfig, id: Uuid) -> Result<NativeAttachmentStatus> {
+    let vm_dir = vm_pin_dir(&cfg.pin_root, id);
+    let iface = read_recorded_iface(id);
+    let prog_pin = vm_dir.join("progs/fluxvm_egress");
+    let attached = if let Some(iface) = iface.as_deref() {
+        prog_pin.exists() && tc_filter_attached(iface).unwrap_or(false)
+    } else {
+        false
+    };
+    Ok(NativeAttachmentStatus {
+        attached,
+        interface: iface,
+        identity: identity_for(id),
+        pin_dir: vm_dir.display().to_string(),
+    })
+}
+
 /// Cleanup fallback for callers that do not have Config. Config-aware
 /// scheduler paths call `remove()`; this catches the normal default and an
 /// operator-supplied environment override after crashes/partial failures.
 pub fn remove_best_effort(id: Uuid) -> Result<()> {
-    detach_tc_filter(id);
     let mut dirs = vec![vm_pin_dir(Path::new("/sys/fs/bpf/fluxvm"), id)];
     if let Ok(root) = std::env::var("FLUXVM_BPF_PIN_ROOT") {
         let p = vm_pin_dir(Path::new(&root), id);
@@ -201,9 +238,7 @@ pub fn remove_best_effort(id: Uuid) -> Result<()> {
         }
     }
     for dir in dirs {
-        if dir.exists() {
-            let _ = fs::remove_dir_all(&dir);
-        }
+        let _ = remove_vm_dir(&dir, id);
     }
     let meta = vm_meta_dir(id);
     if meta.exists() {
@@ -212,7 +247,7 @@ pub fn remove_best_effort(id: Uuid) -> Result<()> {
     Ok(())
 }
 
-fn detach_tc_filter(id: Uuid) {
+fn remove_vm_dir(vm_dir: &Path, id: Uuid) -> Result<()> {
     if let Some(iface) = read_recorded_iface(id) {
         let _ = run(
             "tc",
@@ -230,6 +265,11 @@ fn detach_tc_filter(id: Uuid) {
             ],
         );
     }
+    if vm_dir.exists() {
+        fs::remove_dir_all(vm_dir)
+            .with_context(|| format!("removing eBPF pin dir {}", vm_dir.display()))?;
+    }
+    Ok(())
 }
 
 fn read_recorded_iface(id: Uuid) -> Option<String> {
@@ -259,10 +299,6 @@ fn read_recorded_iface(id: Uuid) -> Option<String> {
         }
     }
     None
-}
-
-fn vm_pin_dir(root: &Path, id: Uuid) -> PathBuf {
-    root.join("vms").join(id.simple().to_string())
 }
 
 fn vm_meta_dir(id: Uuid) -> PathBuf {
@@ -296,7 +332,17 @@ pub fn validate_policy(policy: &VmNetworkPolicy) -> Result<()> {
     for rule in &policy.allow_ports {
         parse_port_rule(rule).with_context(|| format!("invalid eBPF L4 rule {rule:?}"))?;
     }
+    if let Some(mbps) = policy.max_egress_mbps {
+        let _ = mbps_to_bytes_per_second(mbps)?;
+    }
+    if policy.max_egress_pps == Some(0) {
+        bail!("max_egress_pps must be greater than zero when set");
+    }
     Ok(())
+}
+
+fn vm_pin_dir(root: &Path, id: Uuid) -> PathBuf {
+    root.join("vms").join(id.simple().to_string())
 }
 
 pub fn identity_for(id: Uuid) -> u32 {
@@ -316,6 +362,55 @@ fn read_ifindex(iface: &str) -> Result<u32> {
         .with_context(|| format!("parsing ifindex for {iface}"))
 }
 
+fn configure_maps(
+    map_dir: &Path,
+    ifindex: u32,
+    identity: u32,
+    policy: &VmNetworkPolicy,
+    fail_closed_first: bool,
+) -> Result<()> {
+    let id_map = map_dir.join("fluxvm_id");
+    let cidr_map = map_dir.join("fluxvm_v4");
+    let l4_map = map_dir.join("fluxvm_l4");
+    let rate_map = map_dir.join("fluxvm_rate");
+
+    if fail_closed_first {
+        // Publish deny-all first, before deleting any old allowlist keys.
+        update_iface_config(&id_map, ifindex, identity, false, false, false, 0, 0, 0)?;
+    }
+
+    clear_map(&cidr_map)?;
+    clear_map(&l4_map)?;
+    clear_map(&rate_map)?;
+
+    for cidr in &policy.allow_cidrs {
+        update_ipv4_allow(&cidr_map, identity, parse_ipv4_cidr(cidr)?)?;
+    }
+    for rule in &policy.allow_ports {
+        update_l4_allow(&l4_map, identity, parse_port_rule(rule)?)?;
+    }
+
+    let rate_bytes = policy
+        .max_egress_mbps
+        .map(mbps_to_bytes_per_second)
+        .transpose()?
+        .unwrap_or(0);
+    let rate_packets = policy.max_egress_pps.map(u64::from).unwrap_or(0);
+    update_rate_state(&rate_map, identity)?;
+
+    update_iface_config(
+        &id_map,
+        ifindex,
+        identity,
+        policy.default_allow,
+        !policy.allow_cidrs.is_empty(),
+        !policy.allow_ports.is_empty(),
+        policy.sample_rate,
+        rate_bytes,
+        rate_packets,
+    )
+}
+
 fn update_iface_config(
     map: &Path,
     ifindex: u32,
@@ -324,18 +419,62 @@ fn update_iface_config(
     enforce_cidr: bool,
     enforce_l4: bool,
     sample_rate: u32,
+    rate_bytes_per_sec: u64,
+    rate_packets_per_sec: u64,
 ) -> Result<()> {
     let mut key = Vec::with_capacity(4);
     key.extend_from_slice(&ifindex.to_ne_bytes());
 
-    // Must match struct iface_config in bpf/fluxvm_tc.bpf.c exactly.
-    let mut value = Vec::with_capacity(20);
+    // Must match struct iface_config in bpf/fluxvm_tc.bpf.c exactly:
+    // 6 x u32 followed by 2 x u64.
+    let mut value = Vec::with_capacity(40);
     value.extend_from_slice(&identity.to_ne_bytes());
     value.extend_from_slice(&(default_allow as u32).to_ne_bytes());
     value.extend_from_slice(&(enforce_cidr as u32).to_ne_bytes());
     value.extend_from_slice(&(enforce_l4 as u32).to_ne_bytes());
     value.extend_from_slice(&sample_rate.to_ne_bytes());
+    value.extend_from_slice(&0u32.to_ne_bytes());
+    value.extend_from_slice(&rate_bytes_per_sec.to_ne_bytes());
+    value.extend_from_slice(&rate_packets_per_sec.to_ne_bytes());
     bpftool_map_update(map, &key, &value)
+}
+
+fn update_rate_state(map: &Path, identity: u32) -> Result<()> {
+    // struct rate_state = bpf_spin_lock (u32), pad (u32), then three u64s.
+    let key = identity.to_ne_bytes();
+    let value = [0u8; 32];
+    bpftool_map_update(map, &key, &value)
+}
+
+fn mbps_to_bytes_per_second(mbps: u32) -> Result<u64> {
+    if mbps == 0 {
+        bail!("max_egress_mbps must be greater than zero when set");
+    }
+    u64::from(mbps)
+        .checked_mul(1_000_000)
+        .map(|bits| bits / 8)
+        .context("max_egress_mbps is too large")
+}
+
+fn clear_map(map: &Path) -> Result<()> {
+    let root = bpftool_json_dump(map)?;
+    let entries = root
+        .as_array()
+        .context("bpftool map dump must be an array")?;
+    for entry in entries {
+        let key = json_bytes(&entry["key"])?;
+        let mut args = vec![
+            "map".into(),
+            "delete".into(),
+            "pinned".into(),
+            map.display().to_string(),
+            "key".into(),
+            "hex".into(),
+        ];
+        args.extend(hex_args(&key));
+        run("bpftool", &args)?;
+    }
+    Ok(())
 }
 
 fn update_ipv4_allow(map: &Path, identity: u32, cidr: Ipv4Cidr) -> Result<()> {
@@ -478,10 +617,18 @@ fn json_bytes(v: &Value) -> Result<Vec<u8>> {
         return a
             .iter()
             .map(|x| {
-                x.as_u64()
-                    .filter(|n| *n <= 255)
-                    .map(|n| n as u8)
-                    .context("bpftool JSON byte must be 0..255")
+                if let Some(n) = x.as_u64().filter(|n| *n <= 255) {
+                    return Ok(n as u8);
+                }
+                if let Some(n) = x.as_i64().filter(|n| (0..=255).contains(n)) {
+                    return Ok(n as u8);
+                }
+                if let Some(s) = x.as_str() {
+                    let s = s.trim().trim_start_matches("0x");
+                    return u8::from_str_radix(s, 16)
+                        .with_context(|| format!("invalid bpftool hex byte {s:?}"));
+                }
+                bail!("bpftool JSON byte must be 0..255 or hex string, got {x}")
             })
             .collect();
     }
@@ -603,6 +750,26 @@ fn ensure_clsact(iface: &str) -> Result<()> {
     )
 }
 
+fn tc_filter_attached(iface: &str) -> Result<bool> {
+    let out = Command::new("tc")
+        .args([
+            "filter",
+            "show",
+            "dev",
+            iface,
+            "ingress",
+            "pref",
+            TC_PRIORITY,
+        ])
+        .output()
+        .context("querying FluxVM TC filter")?;
+    if !out.status.success() {
+        return Ok(false);
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    Ok(text.contains("bpf") && text.contains(TC_PRIORITY))
+}
+
 fn run(program: &str, args: &[String]) -> Result<()> {
     let out = Command::new(program)
         .args(args)
@@ -666,6 +833,31 @@ mod tests {
     #[test]
     fn bytes_are_bpftool_hex_tokens() {
         assert_eq!(hex_args(&[0, 1, 0xfe]), ["00", "01", "fe"]);
+    }
+
+    #[test]
+    fn json_bytes_accepts_numeric_and_hex_string_arrays() {
+        let numeric = serde_json::json!([205, 13, 100]);
+        assert_eq!(json_bytes(&numeric).unwrap(), vec![205, 13, 100]);
+
+        let hex = serde_json::json!(["0xcd", "0x0d", "0x64"]);
+        assert_eq!(json_bytes(&hex).unwrap(), vec![0xcd, 0x0d, 0x64]);
+    }
+
+    #[test]
+    fn mbps_rate_is_converted_to_bytes_per_second() {
+        assert_eq!(mbps_to_bytes_per_second(1).unwrap(), 125_000);
+        assert_eq!(mbps_to_bytes_per_second(100).unwrap(), 12_500_000);
+        assert!(mbps_to_bytes_per_second(0).is_err());
+    }
+
+    #[test]
+    fn zero_pps_is_rejected() {
+        let policy = VmNetworkPolicy {
+            max_egress_pps: Some(0),
+            ..VmNetworkPolicy::default()
+        };
+        assert!(validate_policy(&policy).is_err());
     }
 
     #[test]

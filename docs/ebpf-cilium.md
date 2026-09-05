@@ -33,8 +33,12 @@ create/start fails.
   is enabled (disabled / refused in `cilium` mode)
 - Host ifindex → stable FluxVM VM identity map
 - IPv4 destination-CIDR (LPM) and TCP/UDP destination-port allowlists
+- Optional Mbps/PPS fixed-window egress limits (`max_egress_mbps` /
+  `max_egress_pps`; native-only)
 - Per-CPU allow/drop counters, LRU flow table, drop/sampled-allow ring buffer
+- Live fail-closed policy reconfigure; `GET /v1/vms/{id}/network/status`
 - ARP and DHCP always allowed so guests can bootstrap
+- Attach without a known guest IP on direct TAP/macvtap (nftables still needs CIDR)
 - Attach point:
   - namespaced TAP → host-side veth `vh<short-id>`
   - direct TAP/macvtap → that host-visible device
@@ -145,6 +149,7 @@ Per-VM maps (pinned under each VM’s `maps/` directory):
 | `fluxvm_id` | ifindex → FluxVM identity + default action + flags |
 | `fluxvm_v4` | LPM: identity + destination IPv4 prefix → allow |
 | `fluxvm_l4` | identity + proto/port → allow |
+| `fluxvm_rate` | identity → fixed-window Mbps/PPS state |
 | `fluxvm_stats` | per-CPU allow/drop counters |
 | `fluxvm_flows` | LRU 5-tuple flow table |
 | `fluxvm_events` | ring buffer for drop / sampled-allow events |
@@ -154,6 +159,7 @@ REST (see [network-fabric.md](network-fabric.md)):
 ```http
 GET  /v1/vms/{id}/network/policy
 POST /v1/vms/{id}/network/policy   # admin role when auth is enabled
+GET  /v1/vms/{id}/network/status
 GET  /v1/vms/{id}/network/stats
 GET  /v1/vms/{id}/network/flows?limit=100
 ```
@@ -161,21 +167,8 @@ GET  /v1/vms/{id}/network/flows?limit=100
 ## Validation
 
 ```bash
-cargo fmt --all -- --check
-cargo test -p fluxvm-network
-cargo test -p fluxvm-scheduler   # or cargo check -p fluxvm-scheduler on hosts without libhivex
-./scripts/build-ebpf.sh
-sudo -E ./scripts/test-ebpf-smoke.sh
-```
-
-The smoke script uses dual netns + one persistent `ip netns exec` session so
-bpffs pins remain visible (see [network-fabric.md](network-fabric.md#tests)).
-
-Quick verifier-only load (no policy behavior):
-
-```bash
-sudo bpftool prog load dist/bpf/fluxvm_tc.bpf.o /sys/fs/bpf/fluxvm-smoke type classifier
-sudo rm -f /sys/fs/bpf/fluxvm-smoke
+./scripts/validate-network-fabric.sh
+FLUXVM_PRIVILEGED_SMOKE=1 ./scripts/validate-network-fabric.sh
 ```
 
 Privileged integration smoke (FluxVm + `NetworkSpec::Tap { netns: true }`):

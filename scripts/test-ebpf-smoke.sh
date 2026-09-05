@@ -16,6 +16,9 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 2
 fi
 
+# BPF map/program loading can otherwise fail on hosts with a small memlock limit.
+ulimit -l unlimited 2>/dev/null || true
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OBJ_DIR="${1:-$ROOT/dist/bpf}"
 TC_OBJ="$OBJ_DIR/fluxvm_tc.bpf.o"
@@ -82,10 +85,13 @@ PY
 }
 
 iface_value() {
+  # identity, default_allow, enforce_cidr, enforce_l4, sample_rate,
+  # rate_bytes_per_sec, rate_packets_per_sec
   python3 - "$@" <<'PY'
 import struct, sys
-vals = [int(x) for x in sys.argv[1:]]
-print(" ".join(f"{b:02x}" for b in struct.pack("=IIIII", *vals)))
+identity, default_allow, enforce_cidr, enforce_l4, sample_rate, rate_bytes, rate_packets = [int(x) for x in sys.argv[1:]]
+raw = struct.pack("=IIIIIIQQ", identity, default_allow, enforce_cidr, enforce_l4, sample_rate, 0, rate_bytes, rate_packets)
+print(" ".join(f"{b:02x}" for b in raw))
 PY
 }
 
@@ -132,17 +138,17 @@ tc filter show dev "$A" ingress | grep -q 'bpf'
 IFINDEX="$(cat "/sys/class/net/$A/ifindex")"
 IFKEY="$(hex_u32 "$IFINDEX")"
 
-ALLOW_VALUE="$(iface_value "$IDENTITY" 1 0 0 0)"
+ALLOW_VALUE="$(iface_value "$IDENTITY" 1 0 0 0 0 0)"
 # shellcheck disable=SC2086
 bpftool map update pinned "$PIN/tc/maps/fluxvm_id" key hex $IFKEY value hex $ALLOW_VALUE
 expect_ping
 
-DENY_VALUE="$(iface_value "$IDENTITY" 0 0 0 0)"
+DENY_VALUE="$(iface_value "$IDENTITY" 0 0 0 0 0 0)"
 # shellcheck disable=SC2086
 bpftool map update pinned "$PIN/tc/maps/fluxvm_id" key hex $IFKEY value hex $DENY_VALUE
 expect_no_ping
 
-CIDR_VALUE="$(iface_value "$IDENTITY" 0 1 0 0)"
+CIDR_VALUE="$(iface_value "$IDENTITY" 0 1 0 0 0 0)"
 # shellcheck disable=SC2086
 bpftool map update pinned "$PIN/tc/maps/fluxvm_id" key hex $IFKEY value hex $CIDR_VALUE
 LPMKEY="$(lpm_key 64 "$IDENTITY" "$A_IP")"
@@ -153,6 +159,23 @@ expect_ping
 
 bpftool -j map dump pinned "$PIN/tc/maps/fluxvm_stats" | grep -q 'key'
 bpftool -j map dump pinned "$PIN/tc/maps/fluxvm_flows" | grep -q 'key'
+
+# Fixed-window PPS limiter: first packet passes, a second packet in the same
+# one-second window is dropped, then traffic recovers after the window rolls.
+IDKEY="$(hex_u32 "$IDENTITY")"
+ZERO_RATE_STATE="$(python3 - <<'PY'
+print(" ".join(["00"] * 32))
+PY
+)"
+# shellcheck disable=SC2086
+bpftool map update pinned "$PIN/tc/maps/fluxvm_rate" key hex $IDKEY value hex $ZERO_RATE_STATE
+RATE_VALUE="$(iface_value "$IDENTITY" 1 0 0 0 0 1)"
+# shellcheck disable=SC2086
+bpftool map update pinned "$PIN/tc/maps/fluxvm_id" key hex $IFKEY value hex $RATE_VALUE
+expect_ping
+expect_no_ping
+sleep 1.1
+expect_ping
 
 tc filter del dev "$A" ingress pref "$TC_PREF" handle 1 bpf
 
@@ -168,4 +191,4 @@ ip link set dev "$A" xdp off
 expect_ping
 INNER
 
-echo "FluxVM TC policy/observability + XDP kernel smoke test passed"
+echo "FluxVM TC policy/rate-limit/observability + XDP kernel smoke test passed"
