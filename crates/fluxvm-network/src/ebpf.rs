@@ -55,7 +55,11 @@ pub fn apply(cfg: &DataplaneConfig, id: Uuid, iface: &str, allow_cidrs: &[String
         .with_context(|| format!("creating eBPF program pin dir {}", prog_dir.display()))?;
     fs::create_dir_all(&map_dir)
         .with_context(|| format!("creating eBPF map pin dir {}", map_dir.display()))?;
-    fs::write(vm_dir.join("iface"), iface)
+    // bpffs only accepts BPF objects — keep the detach sidecar on a normal fs.
+    let meta_dir = vm_meta_dir(id);
+    fs::create_dir_all(&meta_dir)
+        .with_context(|| format!("creating eBPF meta dir {}", meta_dir.display()))?;
+    fs::write(meta_dir.join("iface"), iface)
         .with_context(|| format!("recording eBPF interface {iface}"))?;
 
     let prog_pin = prog_dir.join("fluxvm_egress");
@@ -135,31 +139,52 @@ pub fn apply(cfg: &DataplaneConfig, id: Uuid, iface: &str, allow_cidrs: &[String
 }
 
 pub fn remove(id: Uuid) -> Result<()> {
-    let roots = candidate_pin_roots(id);
-    for vm_dir in roots {
-        if !vm_dir.exists() {
-            continue;
+    let iface = read_recorded_iface(id);
+    if let Some(iface) = iface {
+        let _ = run(
+            "tc",
+            &[
+                "filter".into(),
+                "del".into(),
+                "dev".into(),
+                iface,
+                "ingress".into(),
+                "pref".into(),
+                TC_PRIORITY.into(),
+            ],
+        );
+    }
+
+    for vm_dir in candidate_pin_roots(id) {
+        if vm_dir.exists() {
+            let _ = fs::remove_dir_all(&vm_dir);
         }
+    }
+    let meta = vm_meta_dir(id);
+    if meta.exists() {
+        let _ = fs::remove_dir_all(&meta);
+    }
+    Ok(())
+}
+
+fn read_recorded_iface(id: Uuid) -> Option<String> {
+    let meta = vm_meta_dir(id).join("iface");
+    if let Ok(iface) = fs::read_to_string(&meta) {
+        let iface = iface.trim();
+        if !iface.is_empty() {
+            return Some(iface.to_string());
+        }
+    }
+    // Legacy path from earlier builds that attempted to store iface on bpffs.
+    for vm_dir in candidate_pin_roots(id) {
         if let Ok(iface) = fs::read_to_string(vm_dir.join("iface")) {
             let iface = iface.trim();
             if !iface.is_empty() {
-                let _ = run(
-                    "tc",
-                    &[
-                        "filter".into(),
-                        "del".into(),
-                        "dev".into(),
-                        iface.into(),
-                        "ingress".into(),
-                        "pref".into(),
-                        TC_PRIORITY.into(),
-                    ],
-                );
+                return Some(iface.to_string());
             }
         }
-        let _ = fs::remove_dir_all(&vm_dir);
     }
-    Ok(())
+    None
 }
 
 /// `remove` does not receive Config because it is also called from network
@@ -178,6 +203,15 @@ fn candidate_pin_roots(id: Uuid) -> Vec<PathBuf> {
 
 fn vm_pin_dir(root: &Path, id: Uuid) -> PathBuf {
     root.join("vms").join(id.simple().to_string())
+}
+
+fn vm_meta_dir(id: Uuid) -> PathBuf {
+    if let Ok(root) = std::env::var("FLUXVM_BPF_META_ROOT") {
+        return PathBuf::from(root)
+            .join("vms")
+            .join(id.simple().to_string());
+    }
+    PathBuf::from("/run/fluxvm/ebpf/vms").join(id.simple().to_string())
 }
 
 fn identity_for(id: Uuid) -> u32 {

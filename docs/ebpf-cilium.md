@@ -3,7 +3,7 @@
 FluxVM supports three sandbox dataplane modes:
 
 - `legacy`: existing nftables policy path.
-- `ebpf`: FluxVM loads its own per-VM TC classifier and pins all BPF state under `/sys/fs/bpf/fluxvm`.
+- `ebpf`: FluxVM loads its own per-VM TC classifier and pins all BPF state under `/sys/fs/bpf/fluxvm`. Detach metadata (iface name) lives under `/run/fluxvm/ebpf` because bpffs cannot store regular files.
 - `cilium`: the same FluxVM VM-edge eBPF enforcement, but only after verifying that the host Cilium agent socket and bpffs are visible. FluxVM does **not** write Cilium private BPF maps.
 
 The Cilium mode is intentionally a coexistence mode, not a claim that a FluxVM VM is a native Cilium endpoint. Cilium remains responsible for Kubernetes/node networking; FluxVM owns the VM-edge interface. A future launcher-pod/CNI integration can add first-class Cilium identities without changing the native dataplane API introduced here.
