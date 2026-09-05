@@ -137,4 +137,7 @@ fi
 
 echo "Network Fabric v3 GA enabled (mode=${MODE}, required=true)."
 echo "Verify: curl -sS http://127.0.0.1:7788/v1/vms/<uuid>/network/status"
+echo "Note: after a control-plane restart, a live VM may keep a pre-restart TC"
+echo "filter (ownership mismatch). Detach once, then reconcile reattaches:"
+echo "  sudo tc filter del dev <vh*|tap*> ingress"
 echo "Docs: docs/network-fabric.md"
