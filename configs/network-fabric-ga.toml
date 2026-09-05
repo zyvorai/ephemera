@@ -1,0 +1,29 @@
+# Copyright 2026 Zyvor
+# SPDX-License-Identifier: Apache-2.0
+#
+# Network Fabric v3 — GA production profile (fragment).
+#
+# Merge into /etc/fluxvm.toml (or use scripts/enable-network-fabric-ga.sh).
+# Upgrade-safe default remains mode=legacy when this fragment is absent.
+#
+# Prerequisites:
+#   ./scripts/build-ebpf.sh && install .o under /usr/lib/fluxvm/bpf/
+#   systemd LimitMEMLOCK=infinity + ReadWritePaths for bpffs / /run/fluxvm
+#   Bridged or TAP+netns VMs for attach; user NAT / mode=none soft-skip even
+#   when required=true (fail-closed only when a host-visible edge exists).
+
+[sandbox.dataplane]
+mode = "ebpf"
+bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
+pin_root = "/sys/fs/bpf/fluxvm"
+required = true
+default_allow = false
+allow_cidrs = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+allow_ports = ["tcp/443", "tcp/80", "udp/53"]
+max_egress_mbps = 250
+max_egress_pps = 100000
+sample_rate = 100
+
+# On Cilium nodes use mode = "cilium" instead and leave XDP disabled.
+# [sandbox.dataplane.xdp]
+# enabled = false

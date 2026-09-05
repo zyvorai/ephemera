@@ -29,12 +29,15 @@ The FluxVM hypervisor track (`backend: "flux-vm"`) is the AI-agent sandbox path.
 
 ### Dataplane (summary)
 
-- **Default:** `sandbox.dataplane.mode = "legacy"` (nftables) — no config change required.
+- **Status: GA** — enable with `sudo ./scripts/enable-network-fabric-ga.sh --restart`
+  or merge `configs/network-fabric-ga.toml`.
+- **Default (upgrade-safe):** `sandbox.dataplane.mode = "legacy"` (nftables).
 - **`ebpf`:** TC program from `bpf/fluxvm_tc.bpf.c`; pins under `/sys/fs/bpf/fluxvm`;
   iface/schema/fingerprint meta under `/run/fluxvm/ebpf`; IPv4/IPv6 L3+L4
   allowlists (`allow_cidrs`, `allow_ports`); Mbps/PPS limits; stats/flows/events;
   ARP/DHCP/NDP bootstrap always allowed; fallback to nftables unless
-  `required = true` (IPv6/rate never silently downgrade). Optional node XDP
+  `required = true` **and** a host-visible edge exists (user NAT / `mode=none`
+  soft-skip; IPv6/rate never silently downgrade). Optional node XDP
   (`bpf/fluxvm_xdp.bpf.c`, meta under `/run/fluxvm/xdp/`) — disabled by default
   and refused in `cilium` mode.
 - **`cilium`:** same FluxVM edge attach after verifying `/var/run/cilium/cilium.sock` +
@@ -66,15 +69,15 @@ fluxvm_engine = "firecracker"   # default
 http_proxy_default_port = 8080
 
 # [sandbox.dataplane]
-# mode = "legacy"               # or "ebpf" / "cilium"
+# mode = "ebpf"                 # GA: enable-network-fabric-ga.sh
 # bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
 # pin_root = "/sys/fs/bpf/fluxvm"
-# required = false
-# default_allow = true
-# allow_cidrs = ["10.0.0.0/8", "2001:db8:1234::/48"]
-# allow_ports = ["tcp/443", "udp/53"]
-# max_egress_mbps = 100
-# max_egress_pps = 50000
+# required = true
+# default_allow = false
+# allow_cidrs = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+# allow_ports = ["tcp/443", "tcp/80", "udp/53"]
+# max_egress_mbps = 250
+# max_egress_pps = 100000
 # sample_rate = 100             # 0 = off
 # [sandbox.dataplane.xdp]       # leave disabled with mode = "cilium"
 # enabled = false

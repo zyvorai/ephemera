@@ -431,8 +431,10 @@ sudo ./scripts/test-network-namespace.sh --image /path/to/base.qcow2
 
 ## eBPF / Cilium sandbox dataplane
 
-FluxVM retains **nftables as the default** sandbox dataplane and adds an optional
-**native TC/eBPF** path (**Network Fabric v3 GA**) for the FluxVm agent-sandbox track.
+**Network Fabric v3 is GA.** Upgrade-safe installs keep **nftables** (`mode =
+legacy`) until you opt in with `sudo ./scripts/enable-network-fabric-ga.sh
+--restart` (or `configs/network-fabric-ga.toml`). The native TC/eBPF path applies
+on every backend when a host-visible VM edge exists.
 How the pieces fit together: [Network Fabric architecture](#network-fabric-architecture-how-it-works).
 Full operator detail: [docs/network-fabric.md](docs/network-fabric.md) and
 [docs/ebpf-cilium.md](docs/ebpf-cilium.md).
@@ -459,7 +461,7 @@ Backwards compatibility: configs without `[sandbox.dataplane]` keep `legacy` / n
 - Schema version + policy fingerprint: reconcile heals missing/stale TC after daemon restart; orphan pins GC’d
 - Attach: host veth for `netns: true`, else TAP/macvtap (native path does not require a known guest IP); maps configured **before** TC attach
 - Tears BPF state down on VM network cleanup (only if TC/XDP program ID still matches FluxVM’s)
-- Falls back to nftables unless `sandbox.dataplane.required = true` (IPv6 / rate limits never silently downgrade)
+- Falls back to nftables unless `required = true` **and** a host-visible edge exists (user NAT / `mode=none` soft-skip; IPv6 / rate limits never silently downgrade)
 - Container image installs both `.o` files; DaemonSet mounts bpffs + `/var/run/cilium`; systemd sets `LimitMEMLOCK=infinity`
 
 ### Why Cilium coexistence (not private-map integration)
@@ -490,16 +492,17 @@ raises memlock (`LimitMEMLOCK=infinity`).
 [sandbox]
 egress_allow_domains = ["api.openai.com", ".github.com"]
 
+# GA profile (or: sudo ./scripts/enable-network-fabric-ga.sh --restart)
 [sandbox.dataplane]
 mode = "ebpf"                 # legacy | ebpf | cilium
 bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
 pin_root = "/sys/fs/bpf/fluxvm"
-required = false              # true => fail FluxVm create/start if attach fails
-default_allow = true
-allow_cidrs = ["10.0.0.0/8", "2001:db8:1234::/48"]
-allow_ports = ["tcp/443", "udp/53"]
-max_egress_mbps = 100             # native only
-max_egress_pps = 50000
+required = true               # fail-closed when a host VM edge exists
+default_allow = false
+allow_cidrs = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+allow_ports = ["tcp/443", "tcp/80", "udp/53"]
+max_egress_mbps = 250             # native only
+max_egress_pps = 100000
 sample_rate = 100             # 0 = off
 
 # Optional node-ingress XDP (leave disabled with mode = "cilium")

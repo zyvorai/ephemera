@@ -28,18 +28,22 @@ reaper_interval_secs = 5
 # egress_proxy_listen = "127.0.0.1:18080"
 # http_proxy_default_port = 8080
 #
-# Native VM-edge networking (Network Fabric v1). Defaults to legacy nftables.
+# Native VM-edge networking — Network Fabric v3 GA.
+# Absent / commented = upgrade-safe legacy nftables.
+# Production GA profile: configs/network-fabric-ga.toml
+#   or: sudo ./scripts/enable-network-fabric-ga.sh --restart
 # See docs/network-fabric.md and docs/ebpf-cilium.md.
+#
 # [sandbox.dataplane]
 # mode = "ebpf"                         # legacy | ebpf | cilium
 # bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
 # pin_root = "/sys/fs/bpf/fluxvm"
-# required = false
-# default_allow = true
-# allow_cidrs = ["10.0.0.0/8", "2001:db8:1234::/48"]
-# allow_ports = ["tcp/443", "udp/53"]
-# max_egress_mbps = 250                # native eBPF only; no nftables fallback
-# max_egress_pps = 100000              # native eBPF only
+# required = true                       # GA: fail-closed when a host VM edge exists
+# default_allow = false
+# allow_cidrs = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+# allow_ports = ["tcp/443", "tcp/80", "udp/53"]
+# max_egress_mbps = 250                 # native eBPF only
+# max_egress_pps = 100000
 # sample_rate = 100                     # 0 = off; N ≈ 1/N allowed-flow samples
 #
 # Standalone node-ingress XDP blocklist. Leave disabled with Cilium
@@ -49,7 +53,7 @@ reaper_interval_secs = 5
 # interface = "eno1"
 # bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_xdp.bpf.o"
 # pin_root = "/sys/fs/bpf/fluxvm"
-# required = false
+# required = true
 # block_cidrs = ["198.51.100.0/24", "2001:db8:bad::/48"]
 #
 # [[sandbox.credential_vault]]

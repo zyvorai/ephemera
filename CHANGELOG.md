@@ -26,6 +26,9 @@
   IPv6, rate limits, REST status/schema, XDP meta paths, `LimitMEMLOCK`, dual-netns
   smoke, e2e) plus a **vs traditional networking** comparison table (lab policy
   update ~100–120 ms p50).
+- **Network Fabric v3 GA ship** — `configs/network-fabric-ga.toml` +
+  `scripts/enable-network-fabric-ga.sh`; `required=true` fail-closes only when a
+  host-visible VM edge exists (user NAT / `mode=none` soft-skip).
 
 ## 0.3.0
 

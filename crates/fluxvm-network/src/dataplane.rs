@@ -157,11 +157,21 @@ pub fn apply_sandbox_policy(
             None => Ok(()),
         },
         DataplaneMode::Ebpf | DataplaneMode::Cilium => {
+            // GA semantics: `required = true` fail-closes when a host-visible
+            // VM edge exists but attach fails. network.mode=none / user NAT
+            // have no edge — always soft-skip (even when required).
+            let Some(iface) = iface else {
+                tracing::debug!(
+                    %id,
+                    "skipping dataplane attach: no host-visible VM interface"
+                );
+                return Ok(());
+            };
+
             let native = (|| -> Result<()> {
                 if dp.mode == DataplaneMode::Cilium {
                     crate::cilium::validate_host()?;
                 }
-                let iface = iface.context("eBPF dataplane needs a host-visible VM interface")?;
                 crate::ebpf::apply(dp, &policy, id, iface)
             })();
 
@@ -172,7 +182,6 @@ pub fn apply_sandbox_policy(
                 }
                 Err(e) if dp.required || policy_uses_native_only_features(&policy) => Err(e),
                 Err(e) => {
-                    // Expected for network.mode=none / user NAT (no host TAP).
                     tracing::debug!(
                         %id,
                         error = %e,
@@ -187,12 +196,10 @@ pub fn apply_sandbox_policy(
                             );
                             apply_nftables(id, cidr, &policy)
                         }
-                        // network.mode=none / user NAT: nothing host-visible to pin and
-                        // no guest CIDR for nftables — leave the kernel clean.
                         None => {
                             tracing::debug!(
                                 %id,
-                                "skipping dataplane attach: no host interface and no guest CIDR"
+                                "skipping dataplane attach: native failed and no guest CIDR for nftables"
                             );
                             Ok(())
                         }

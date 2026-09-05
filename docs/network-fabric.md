@@ -1,8 +1,18 @@
 # FluxVM Network Fabric v3 GA
 
-v3 is the GA hardening of the **core VM-edge dataplane** for FluxVm sandboxes.
-Service load balancing, BGP, WireGuard, and first-class Cilium endpoint identity
-belong in separate projects rather than expanding this blast radius.
+**Status: GA.** v3 freezes the **core VM-edge dataplane** ABI (TC/eBPF policy,
+status/stats/flows, schema fingerprints, ownership, reconcile). Upgrade-safe
+installs keep `mode = "legacy"` until you opt into the GA profile:
+
+```bash
+sudo ./scripts/enable-network-fabric-ga.sh --restart
+# or merge configs/network-fabric-ga.toml into /etc/fluxvm.toml
+```
+
+`required = true` fail-closes when a host-visible VM edge exists but attach
+fails; `network.mode=none` / user NAT still soft-skip (no edge). Service load
+balancing, BGP, WireGuard, and first-class Cilium endpoint identity belong in
+separate projects rather than expanding this blast radius.
 
 For a README-level walkthrough with diagrams, see
 [Network Fabric architecture](../README.md#network-fabric-architecture-how-it-works).
@@ -264,7 +274,11 @@ block_cidrs = ["198.51.100.0/24", "2001:db8:bad::/48"]
 Standalone only. `mode = "cilium"` rejects FluxVM XDP so it cannot replace
 Cilium acceleration. Existing third-party XDP is never replaced.
 
-## Recommended production configuration
+## Recommended production configuration (GA)
+
+Ship file: [`configs/network-fabric-ga.toml`](../configs/network-fabric-ga.toml).
+One-shot: `sudo ./scripts/enable-network-fabric-ga.sh --restart`
+(use `--cilium` on Cilium nodes).
 
 ```toml
 [sandbox.dataplane]
@@ -273,14 +287,15 @@ bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
 pin_root = "/sys/fs/bpf/fluxvm"
 required = true
 default_allow = false
-allow_cidrs = ["10.0.0.0/8", "2001:db8:100::/48"]
-allow_ports = ["tcp/443", "udp/53"]
+allow_cidrs = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+allow_ports = ["tcp/443", "tcp/80", "udp/53"]
 max_egress_mbps = 250
 max_egress_pps = 100000
 sample_rate = 100
 ```
 
-For a security boundary, use `required = true`.
+GA semantics: fail-closed on the VM edge when an edge exists; soft-skip when
+there is no host-visible iface.
 
 ## Validation
 

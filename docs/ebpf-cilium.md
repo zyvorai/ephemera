@@ -21,10 +21,13 @@ Default remains `sandbox.dataplane.mode = "legacy"`. Existing configs that omit
 
 Dataplane attach / teardown / reconfigure / reconcile runs for **all** backends
 (QEMU, Cloud Hypervisor, Firecracker, FluxVm) when a host-visible interface
-exists. If there is no iface and no guest CIDR (e.g. `network.mode=none` or
-user NAT) and `required = false`, attach soft-skips. If `required = true`,
-create/start fails on attach error. IPv6 CIDRs and Mbps/PPS limits are
-native-only and refuse silent nftables downgrade.
+exists. No host-visible iface (`network.mode=none` / user NAT) always
+**soft-skips**, even when `required = true`. With an edge present,
+`required = true` fail-closes on attach error (GA). IPv6 CIDRs and Mbps/PPS
+limits are native-only and refuse silent nftables downgrade.
+
+GA enable: `sudo ./scripts/enable-network-fabric-ga.sh --restart` or
+`configs/network-fabric-ga.toml`.
 
 ## How coexistence fits
 
@@ -117,16 +120,17 @@ objects under `/usr/lib/fluxvm/bpf/`. Runtime image includes `nftables` and
 ## Configuration
 
 ```toml
+# GA profile (see configs/network-fabric-ga.toml)
 [sandbox.dataplane]
 mode = "ebpf"                 # legacy | ebpf | cilium
 bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
 pin_root = "/sys/fs/bpf/fluxvm"
-required = false              # true => fail VM create/start if eBPF cannot attach
-default_allow = true          # false = deny-by-default for non-matching traffic
-allow_cidrs = ["10.0.0.0/8", "2001:db8:1234::/48"]
-allow_ports = ["tcp/443", "udp/53"]
-max_egress_mbps = 100         # native only
-max_egress_pps = 50000
+required = true               # fail-closed when a host VM edge exists
+default_allow = false
+allow_cidrs = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+allow_ports = ["tcp/443", "tcp/80", "udp/53"]
+max_egress_mbps = 250         # native only
+max_egress_pps = 100000
 sample_rate = 100             # 0 = off; N ≈ 1/N allowed-flow samples
 
 # Optional node-ingress XDP blocklist (not with mode = "cilium")
@@ -134,7 +138,7 @@ sample_rate = 100             # 0 = off; N ≈ 1/N allowed-flow samples
 # enabled = true
 # interface = "eno1"
 # bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_xdp.bpf.o"
-# required = false
+# required = true
 # block_cidrs = ["198.51.100.0/24", "2001:db8:bad::/48"]
 ```
 
