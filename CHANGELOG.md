@@ -22,8 +22,9 @@
   `ping -I` fails and `/sys` remounts drop bpffs pins across separate execs.
 
 ### Changed
-- Docs/README refreshed for Network Fabric v1–v3 (L4 ports, IPv6, rate limits,
-  REST status/schema, XDP meta paths, `LimitMEMLOCK`, dual-netns smoke, e2e).
+- Docs/README refreshed for Network Fabric v1–v3 (architecture diagrams, L4 ports,
+  IPv6, rate limits, REST status/schema, XDP meta paths, `LimitMEMLOCK`, dual-netns
+  smoke, e2e).
 
 ## 0.3.0
 

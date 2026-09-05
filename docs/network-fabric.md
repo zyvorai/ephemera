@@ -1,11 +1,50 @@
 # FluxVM Network Fabric v3 GA
 
-Target base: `zyvorai/fluxvm@af7e66f9cd6acdf564940f12a75a8b0e097666cd`
-(the merged `Native eBPF VM dataplane with safe Cilium coexistence` change).
+v3 is the GA hardening of the **core VM-edge dataplane** for FluxVm sandboxes.
+Service load balancing, BGP, WireGuard, and first-class Cilium endpoint identity
+belong in separate projects rather than expanding this blast radius.
 
-v3 is the final hardening pass for the **core VM-edge dataplane**. Service
-load balancing, BGP, WireGuard and first-class Cilium endpoint identity should
-be separate projects/PRs rather than increasing the blast radius of this one.
+For a README-level walkthrough with diagrams, see
+[Network Fabric architecture](../README.md#network-fabric-architecture-how-it-works).
+
+## Architecture (how it works)
+
+```mermaid
+flowchart TB
+  subgraph control [Control plane]
+    API["REST /v1/vms/.../network"]
+    Sched[Scheduler]
+    DP[fluxvm-network]
+    API --> Sched --> DP
+  end
+
+  subgraph state [State]
+    JSON["durable policy JSON"]
+    BPF["bpffs pins + maps"]
+    Run["/run/fluxvm/ebpf meta"]
+  end
+
+  subgraph path [Packet path]
+    G[Guest] --> T[TAP] --> H[host iface] --> TC[TC fluxvm_egress] --> Out[host / Cilium]
+  end
+
+  DP --> JSON
+  DP --> BPF
+  DP --> Run
+  DP --> TC
+```
+
+### Namespaced vs direct attach
+
+```mermaid
+flowchart LR
+  subgraph ns [netns true]
+    V1[Guest] --> Tap1[TAP] --> Br[bridge] --> Vh[vh host veth] --> Tc1[TC]
+  end
+  subgraph direct [direct TAP or macvtap]
+    V2[Guest] --> Tap2[host TAP/macvtap] --> Tc2[TC]
+  end
+```
 
 ## What v3 adds over the merged v1
 
@@ -45,6 +84,8 @@ IPv6 CIDRs and rate limits are native-only. FluxVM refuses silent fallback to
 legacy nftables when policy semantics cannot be preserved.
 
 ## VM-edge attachment
+
+See the architecture diagrams above. In short:
 
 Namespaced TAP:
 
