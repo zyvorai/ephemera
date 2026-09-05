@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Copyright 2026 Zyvor
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build the FluxVM TC classifier object from bpf/fluxvm_tc.bpf.c.
+# Docs: docs/ebpf-cilium.md  |  Install: /usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

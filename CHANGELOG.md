@@ -9,7 +9,7 @@
 - **Network** — netns NAT via nftables, real IPAM (`ipam.json`), egress allowlist wired to dataplane, auto L7 redirect when proxy listen is set.
 - **Snapshots** — QEMU QMP `savevm` + Cloud Hypervisor `ch-remote snapshot`; `POST /v1/vms/{id}/snapshot`.
 - **Sandbox** — `fluxvm_engine = "kvm"` (no Firecracker child), multi-port proxy defaults, native TC/eBPF dataplane (`legacy`/`ebpf`/`cilium`, default nftables), bench script + docs.
-- **eBPF / Cilium** — `bpf/fluxvm_tc.bpf.c`, pin namespace under `/sys/fs/bpf/fluxvm`, safe Cilium coexistence without mutating Cilium private maps; bpffs + `/var/run/cilium` DaemonSet mounts.
+- **eBPF / Cilium** — Native TC classifier (`bpf/fluxvm_tc.bpf.c`); modes `legacy` / `ebpf` / `cilium` (default nftables); pins under `/sys/fs/bpf/fluxvm`; iface meta under `/run/fluxvm/ebpf`; LPM IPv4 allowlist, counters, ARP/DHCP allow; nftables fallback unless `required`; Cilium coexistence without private-map writes; Dockerfile BPF build; DaemonSet bpffs + `/var/run/cilium` mounts. Docs: [docs/ebpf-cilium.md](docs/ebpf-cilium.md).
 - **Windows** — `unattend_path` / `sysprep` on `build-image` `windows{}`.
 - **QEMU placement** — optional `numa_node`, `cpuset`, `hugepages`, `vfio_devices` on create.
 - Richer Prometheus metrics (auth/egress denies, create/start latency).

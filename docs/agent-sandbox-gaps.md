@@ -21,11 +21,23 @@ The FluxVM hypervisor track (`backend: "flux-vm"`) is the AI-agent sandbox path.
 | **Multi-port proxy defaults** on sandbox create (`http_proxy_port(s)`) | Yes |
 | AutoPause + activity tracking + wake-on-request | Yes |
 | Egress allowlist + credential vault + live L7 proxy | Yes |
-| **nftables + native TC/eBPF dataplane** (`legacy` / `ebpf` / `cilium`) | Yes — see [docs/ebpf-cilium.md](ebpf-cilium.md) |
+| **Sandbox dataplane** — `legacy` nftables (default), `ebpf` TC classifier, `cilium` coexistence | Yes — [docs/ebpf-cilium.md](ebpf-cilium.md) |
 | OCI → template export | Yes |
 | **Redis shared sandbox index** (`FLUXVM_SANDBOX_STATE_URL`) | Yes |
 | `/console` ops UI | Yes |
 | **Benchmarks** — `scripts/bench-sandbox.sh`, [docs/benchmarks/README.md](../benchmarks/README.md) | Yes |
+
+### Dataplane (summary)
+
+- **Default:** `sandbox.dataplane.mode = "legacy"` (nftables) — no config change required.
+- **`ebpf`:** real TC program from `bpf/fluxvm_tc.bpf.c`; pins under `/sys/fs/bpf/fluxvm`;
+  iface meta under `/run/fluxvm/ebpf`; LPM IPv4 allowlist; ARP/DHCP always allowed;
+  fallback to nftables unless `required = true`.
+- **`cilium`:** same FluxVM edge attach after verifying `/var/run/cilium/cilium.sock` +
+  bpffs; **does not** write Cilium private maps (coexistence, not Cilium endpoint identity).
+
+Applied on FluxVm create/start when a guest CIDR is known. See README
+[eBPF / Cilium sandbox dataplane](../README.md#ebpf--cilium-sandbox-dataplane).
 
 ## Remaining (optional hardening)
 
@@ -42,11 +54,19 @@ fluxvm_engine = "firecracker"   # default
 
 [sandbox]
 http_proxy_default_port = 8080
-# dataplane.mode = "legacy"   # or "ebpf" / "cilium" — see docs/ebpf-cilium.md
+
+# [sandbox.dataplane]
+# mode = "legacy"               # or "ebpf" / "cilium"
+# bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
+# pin_root = "/sys/fs/bpf/fluxvm"
+# required = false
+# default_allow = true
+# allow_cidrs = ["10.0.0.0/8"]
 ```
 
 ## Where FluxVM is ahead or different
 
 - Three+ VMM backends and richer storage (LVM thin, NBD, Ceph RBD)
 - virtiofs, macvtap, per-VM netns, image catalog Ed25519 signing
+- Native TC/eBPF + safe Cilium coexistence without CNI lock-in
 - Suite fit: GuestKit → FluxVM → h2kvm / Ragnarok

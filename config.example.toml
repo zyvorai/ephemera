@@ -28,15 +28,16 @@ reaper_interval_secs = 5
 # egress_proxy_listen = "127.0.0.1:18080"
 # http_proxy_default_port = 8080
 #
-# Native VM-edge dataplane. Defaults to `legacy`; use `ebpf` for standalone
-# hosts or `cilium` to require a Cilium node while keeping FluxVM pins/maps
-# isolated from Cilium internals. See docs/ebpf-cilium.md.
+# Native VM-edge dataplane. Defaults to `legacy` (nftables). Use `ebpf` for
+# standalone hosts or `cilium` to require a Cilium node while keeping FluxVM
+# pins/maps isolated from Cilium internals. Full write-up: docs/ebpf-cilium.md
+# and README "eBPF / Cilium sandbox dataplane".
 # [sandbox.dataplane]
 # mode = "ebpf"                 # legacy | ebpf | cilium
 # bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
 # pin_root = "/sys/fs/bpf/fluxvm"
-# required = false              # true => fail VM start if eBPF cannot attach
-# default_allow = false
+# required = false              # true => fail FluxVm start if eBPF cannot attach
+# default_allow = true          # false = deny-by-default for non-matching traffic
 # allow_cidrs = ["10.0.0.0/8", "192.0.2.0/24"]
 #
 # [[sandbox.credential_vault]]
