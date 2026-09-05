@@ -179,9 +179,15 @@ pub fn apply_sandbox_policy(
                     );
                     match guest_cidr {
                         Some(cidr) => apply_nftables(id, cidr, &policy),
-                        None => Err(e).context(
-                            "native eBPF dataplane failed and nftables fallback needs a known guest CIDR",
-                        ),
+                        // network.mode=none / user NAT: nothing host-visible to pin and
+                        // no guest CIDR for nftables — leave the kernel clean.
+                        None => {
+                            warn!(
+                                %id,
+                                "skipping dataplane attach: no host interface and no guest CIDR"
+                            );
+                            Ok(())
+                        }
                     }
                 }
             }
