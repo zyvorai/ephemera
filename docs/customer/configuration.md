@@ -20,6 +20,7 @@ Every create request may set `"storage"` to switch how that VM's disk is provisi
 
 - **Firecracker jailer** — a `[jailer]` section (`enabled`, `uid`, `gid`, `chroot_base_dir`) switches every Firecracker VM to launch through `jailer` instead of directly.
 - **Network namespaces** — set `netns: true` on a request's `network` block to give that VM its own namespace instead of sharing the host bridge.
+- **Sandbox dataplane (optional)** — default remains nftables; set `[sandbox.dataplane]` to `ebpf` or `cilium` for native TC/eBPF L3+L4 policy, stats/flows, and optional XDP. See [Network Fabric](../network-fabric.md) and [eBPF / Cilium](../ebpf-cilium.md).
 - **cgroup v2 resource control** applies automatically to every VM; use the REST API's `/resources` endpoint or the CLI to set CPU/memory/IO/pids/cpuset limits after creation.
 
 ## Auth

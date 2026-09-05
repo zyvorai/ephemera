@@ -136,7 +136,10 @@ For how that compares to a full AI-agent sandbox product (tens-of-ms snapshot
 boot, egress vault, AutoPause), see
 [docs/agent-sandbox-gaps.md](agent-sandbox-gaps.md). The FluxVm backend
 (`backend: "flux-vm"`) is the agent-sandbox track: memory snapshots, `/v1/sandboxes`,
-guest HTTP proxy with AutoResume, L7 egress, and `/console`.
+guest HTTP proxy with AutoResume, L7 egress, `/console`, and an optional native
+TC/eBPF dataplane (nftables default; Cilium coexistence without mutating Cilium
+maps — [docs/network-fabric.md](network-fabric.md),
+[docs/ebpf-cilium.md](ebpf-cilium.md)).
 
 ## Disposable dev/test environments
 

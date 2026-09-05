@@ -52,6 +52,12 @@ fn short_id(id: Uuid) -> String {
     id.simple().to_string()[..8].to_string()
 }
 
+/// Host-visible side of this VM's namespace veth pair. Public so the
+/// dataplane can attach TC/eBPF without persisting another piece of state.
+pub fn host_veth_name(id: Uuid) -> String {
+    format!("vh{}", short_id(id))
+}
+
 fn nft_table_name(short: &str) -> String {
     format!("fluxvm_netns_{short}")
 }
@@ -88,17 +94,16 @@ pub async fn prepare(state_dir: &Path, id: Uuid, mac: Option<&str>) -> Result<Ne
     let mac = mac.context("netns networking requires an explicit MAC address")?;
     let short = short_id(id);
     let netns = format!("eph-{short}");
-    let veth_host = format!("vh{short}");
+    let veth_host = host_veth_name(id);
     let veth_ns = format!("vn{short}");
     let bridge = format!("br{short}");
     let tap = format!("tap{short}");
     let state_dir_buf = state_dir.to_path_buf();
     let state_dir_ipam = state_dir_buf.clone();
-    let (third, base) = tokio::task::spawn_blocking(move || {
-        IpamStore::load(&state_dir_ipam).allocate(id)
-    })
-    .await
-    .context("ipam allocate worker panicked")??;
+    let (third, base) =
+        tokio::task::spawn_blocking(move || IpamStore::load(&state_dir_ipam).allocate(id))
+            .await
+            .context("ipam allocate worker panicked")??;
     let host_ip = format!("169.254.{third}.{}/28", base + 1);
     let ns_ip = format!("169.254.{third}.{}/28", base + 2);
     let ns_subnet = subnet_from_octets(third, base);

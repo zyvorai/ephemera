@@ -21,17 +21,34 @@ The FluxVM hypervisor track (`backend: "flux-vm"`) is the AI-agent sandbox path.
 | **Multi-port proxy defaults** on sandbox create (`http_proxy_port(s)`) | Yes |
 | AutoPause + activity tracking + wake-on-request | Yes |
 | Egress allowlist + credential vault + live L7 proxy | Yes |
-| **nftables dataplane** per sandbox + `scripts/load-sandbox-tc.sh` stub | Yes |
+| **Sandbox dataplane** — `legacy` nftables (default), `ebpf` TC L3+L4, `cilium` coexistence, policy/stats/flows API, optional XDP | Yes — [docs/network-fabric.md](network-fabric.md) |
 | OCI → template export | Yes |
 | **Redis shared sandbox index** (`FLUXVM_SANDBOX_STATE_URL`) | Yes |
 | `/console` ops UI | Yes |
 | **Benchmarks** — `scripts/bench-sandbox.sh`, [docs/benchmarks/README.md](../benchmarks/README.md) | Yes |
 
+### Dataplane (summary)
+
+- **Default:** `sandbox.dataplane.mode = "legacy"` (nftables) — no config change required.
+- **`ebpf`:** TC program from `bpf/fluxvm_tc.bpf.c`; pins under `/sys/fs/bpf/fluxvm`;
+  iface meta under `/run/fluxvm/ebpf`; L3+L4 allowlists (`allow_cidrs`, `allow_ports`);
+  stats/flows/events maps; ARP/DHCP always allowed; fallback to nftables unless
+  `required = true`. Optional node XDP (`bpf/fluxvm_xdp.bpf.c`, meta under
+  `/run/fluxvm/xdp/`) — disabled by default and refused in `cilium` mode.
+- **`cilium`:** same FluxVM edge attach after verifying `/var/run/cilium/cilium.sock` +
+  bpffs; **does not** write Cilium private maps (coexistence, not Cilium endpoint identity).
+- **REST:** `GET/POST /v1/vms/{id}/network/policy`, `GET …/stats`, `GET …/flows`
+  (native modes only; `POST` needs admin when auth is enabled).
+
+Applied on FluxVm create/start/restart when a guest CIDR is known. See
+[network-fabric.md](network-fabric.md) and README
+[eBPF / Cilium sandbox dataplane](../README.md#ebpf--cilium-sandbox-dataplane).
+
 ## Remaining (optional hardening)
 
 - Production-grade in-tree KVM guests (virtio-blk from rootfs, vsock, snapshots without Firecracker)
-- Full eBPF TC programs beyond nftables + the TC stub script
 - Published density/cold-start numbers from your lab hardware
+- Cilium-native VM endpoints / identity-aware Hubble (beyond coexistence mode)
 
 ## Host config
 
@@ -42,10 +59,23 @@ fluxvm_engine = "firecracker"   # default
 
 [sandbox]
 http_proxy_default_port = 8080
+
+# [sandbox.dataplane]
+# mode = "legacy"               # or "ebpf" / "cilium"
+# bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
+# pin_root = "/sys/fs/bpf/fluxvm"
+# required = false
+# default_allow = true
+# allow_cidrs = ["10.0.0.0/8"]
+# allow_ports = ["tcp/443", "udp/53"]
+# sample_rate = 100             # 0 = off
+# [sandbox.dataplane.xdp]       # leave disabled with mode = "cilium"
+# enabled = false
 ```
 
 ## Where FluxVM is ahead or different
 
 - Three+ VMM backends and richer storage (LVM thin, NBD, Ceph RBD)
 - virtiofs, macvtap, per-VM netns, image catalog Ed25519 signing
+- Native TC/eBPF + safe Cilium coexistence without CNI lock-in
 - Suite fit: GuestKit → FluxVM → h2kvm / Ragnarok

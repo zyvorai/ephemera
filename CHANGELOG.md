@@ -8,10 +8,20 @@
 - **Security boundary** — fail-closed auth off-loopback, JSON audit logs (`fluxvm_audit`), `allowed_network_modes` / `allow_extra_args` policy, per-token VM/memory quotas, seccomp-bpf (Linux), AppArmor profile, UDS `0o600`, optional cosign catalog verify.
 - **Network** — netns NAT via nftables, real IPAM (`ipam.json`), egress allowlist wired to dataplane, auto L7 redirect when proxy listen is set.
 - **Snapshots** — QEMU QMP `savevm` + Cloud Hypervisor `ch-remote snapshot`; `POST /v1/vms/{id}/snapshot`.
-- **Sandbox** — `fluxvm_engine = "kvm"` (no Firecracker child), multi-port proxy defaults, TC stub script, bench script + docs.
+- **Sandbox** — `fluxvm_engine = "kvm"` (no Firecracker child), multi-port proxy defaults, native TC/eBPF dataplane (`legacy`/`ebpf`/`cilium`, default nftables), bench script + docs.
+- **eBPF / Cilium / Network Fabric v1** — TC L3+L4 allowlists, per-VM policy API (`/v1/vms/{id}/network/{policy,stats,flows}`), optional XDP node guard, flows/stats maps; modes `legacy`/`ebpf`/`cilium` (default nftables); docs: [docs/network-fabric.md](docs/network-fabric.md), [docs/ebpf-cilium.md](docs/ebpf-cilium.md).
 - **Windows** — `unattend_path` / `sysprep` on `build-image` `windows{}`.
 - **QEMU placement** — optional `numa_node`, `cpuset`, `hugepages`, `vfio_devices` on create.
 - Richer Prometheus metrics (auth/egress denies, create/start latency).
+
+### Fixed
+- **eBPF smoke** — `scripts/test-ebpf-smoke.sh` uses dual netns and one persistent
+  `ip netns exec` session so policy/XDP checks work on hosts where same-netns
+  `ping -I` fails and `/sys` remounts drop bpffs pins across separate execs.
+
+### Changed
+- Docs/README refreshed for Network Fabric v1 (L4 ports, REST, XDP meta paths,
+  `LimitMEMLOCK`, dual-netns smoke).
 
 ## 0.3.0
 

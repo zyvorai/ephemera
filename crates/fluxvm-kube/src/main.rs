@@ -7,7 +7,10 @@ use fluxvm_kube::{controller, crd::DisposableVm, fluxvm_client::FluxVMClient, pl
 use kube::CustomResourceExt;
 
 #[derive(Parser)]
-#[command(name = "fluxvm-kube", about = "DisposableVm CRD operator for Zyvor FluxVM")]
+#[command(
+    name = "fluxvm-kube",
+    about = "DisposableVm CRD operator for Zyvor FluxVM"
+)]
 struct Cli {
     /// Emit the CRD JSON to stdout and exit.
     #[arg(long)]

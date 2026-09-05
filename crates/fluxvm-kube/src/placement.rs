@@ -14,7 +14,10 @@ use k8s_openapi::api::core::v1::Node;
 use kube::{
     Api, Client, ResourceExt,
     api::{Patch, PatchParams},
-    runtime::{controller::{Action, Controller}, watcher},
+    runtime::{
+        controller::{Action, Controller},
+        watcher,
+    },
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
@@ -47,10 +50,7 @@ pub async fn run(client: Client) {
         .await;
 }
 
-async fn reconcile(
-    obj: Arc<DisposableVm>,
-    client: Arc<Client>,
-) -> Result<Action, PlaceError> {
+async fn reconcile(obj: Arc<DisposableVm>, client: Arc<Client>) -> Result<Action, PlaceError> {
     if obj.spec.node.as_ref().is_some_and(|n| !n.is_empty()) {
         return Ok(Action::await_change());
     }
@@ -61,12 +61,8 @@ async fn reconcile(
     let patch = serde_json::json!({
         "spec": { "node": node }
     });
-    api.patch(
-        &name,
-        &PatchParams::default(),
-        &Patch::Merge(&patch),
-    )
-    .await?;
+    api.patch(&name, &PatchParams::default(), &Patch::Merge(&patch))
+        .await?;
     tracing::info!(%name, %ns, %node, "placed DisposableVm");
     Ok(Action::requeue(Duration::from_secs(30)))
 }

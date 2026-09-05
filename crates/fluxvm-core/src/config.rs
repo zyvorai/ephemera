@@ -103,6 +103,9 @@ pub struct SandboxConfig {
     /// Default guest port for `/sandbox/{id}/…` when no port is in the path.
     #[serde(default = "default_http_proxy_port")]
     pub http_proxy_default_port: u16,
+    /// VM-edge dataplane. Legacy nftables is the default; native eBPF and
+    /// Cilium-coexistence modes are explicit opt-ins.
+    pub dataplane: DataplaneConfig,
 }
 
 fn default_http_proxy_port() -> u16 {
@@ -119,6 +122,82 @@ impl Default for SandboxConfig {
             templates_dir: None,
             egress_proxy_listen: String::new(),
             http_proxy_default_port: default_http_proxy_port(),
+            dataplane: DataplaneConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum DataplaneMode {
+    /// Existing nftables implementation.
+    #[default]
+    Legacy,
+    /// FluxVM-owned TC/eBPF program pinned under `pin_root`.
+    Ebpf,
+    /// Verify Cilium is present, then attach FluxVM's VM-edge TC/eBPF
+    /// program without modifying Cilium's private BPF maps.
+    Cilium,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DataplaneConfig {
+    pub mode: DataplaneMode,
+    pub bpf_object: PathBuf,
+    pub pin_root: PathBuf,
+    /// If true, a dataplane load/attach failure fails VM creation/start.
+    /// If false, FluxVM logs the failure and falls back to nftables.
+    pub required: bool,
+    /// Default action when no CIDR entry matches. `true` preserves the
+    /// pre-eBPF allow-all behavior until an operator opts into deny-by-default.
+    pub default_allow: bool,
+    /// IPv4 destination CIDRs allowed by the native eBPF LPM trie.
+    pub allow_cidrs: Vec<String>,
+    /// L4 allowlist entries (`tcp/443`, `udp/53`, …).
+    pub allow_ports: Vec<String>,
+    /// Allowed-flow ringbuf sampling: 0=off, N≈1/N packets.
+    pub sample_rate: u32,
+    /// Optional standalone node-ingress XDP guard (disabled with Cilium).
+    pub xdp: XdpConfig,
+}
+
+impl Default for DataplaneConfig {
+    fn default() -> Self {
+        Self {
+            mode: DataplaneMode::Legacy,
+            bpf_object: "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o".into(),
+            pin_root: "/sys/fs/bpf/fluxvm".into(),
+            required: false,
+            default_allow: true,
+            allow_cidrs: Vec::new(),
+            allow_ports: Vec::new(),
+            sample_rate: 0,
+            xdp: XdpConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct XdpConfig {
+    pub enabled: bool,
+    pub interface: Option<String>,
+    pub bpf_object: PathBuf,
+    pub pin_root: PathBuf,
+    pub required: bool,
+    pub block_cidrs: Vec<String>,
+}
+
+impl Default for XdpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interface: None,
+            bpf_object: "/usr/lib/fluxvm/bpf/fluxvm_xdp.bpf.o".into(),
+            pin_root: "/sys/fs/bpf/fluxvm".into(),
+            required: false,
+            block_cidrs: Vec::new(),
         }
     }
 }

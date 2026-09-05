@@ -1,11 +1,14 @@
 // Copyright 2026 Zyvor
 // SPDX-License-Identifier: Apache-2.0
 
+pub mod cilium;
 pub mod dataplane;
+pub mod ebpf;
 pub mod egress;
 pub mod egress_proxy;
 pub mod ipam;
 pub mod netns;
+pub mod xdp;
 
 use anyhow::{Context, Result, bail};
 use fluxvm_core::{
@@ -198,6 +201,25 @@ pub async fn prepare(cfg: &Config, id: Uuid, spec: &NetworkSpec) -> Result<Prepa
     }
 }
 
+/// Host-visible interface where VM-originated traffic enters the host.
+/// Namespaced TAP uses the host side of the VM veth; direct TAP/macvtap uses
+/// the prepared host device. This is deterministic across stop/start.
+pub fn dataplane_interface_name(
+    id: Uuid,
+    has_netns: bool,
+    tap_name: Option<&str>,
+) -> Option<String> {
+    if has_netns {
+        Some(netns::host_veth_name(id))
+    } else {
+        tap_name.map(str::to_string)
+    }
+}
+
+pub fn dataplane_interface(id: Uuid, network: &PreparedNetwork) -> Option<String> {
+    dataplane_interface_name(id, network.netns.is_some(), network.tap_name.as_deref())
+}
+
 /// Opens the macvtap character device (`/dev/tap<ifindex>`) for `name`
 /// without O_CLOEXEC, so the fd survives exec into the spawned VMM and can
 /// be passed on the command line (`-netdev tap,fd=N` / `--net fd=N`).
@@ -227,6 +249,10 @@ pub async fn cleanup(
     tap_name: &str,
     netns_name: Option<&str>,
 ) -> Result<()> {
+    // Config-aware scheduler paths already remove native pins. This fallback
+    // catches default-path state after partial failures/crashes.
+    let _ = dataplane::remove_sandbox_policy_best_effort(id);
+
     // Deleting the namespace tears down everything inside it (the tap
     // included) — no separate tap cleanup needed, and calling
     // cleanup_tap/cleanup_macvtap for a namespaced tap would fail anyway

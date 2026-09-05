@@ -17,6 +17,7 @@ ExecStartPre=/usr/bin/mkdir -p /run/netns
 ExecStart=/usr/local/bin/fluxvm --config /etc/fluxvm.toml serve
 Restart=on-failure
 RestartSec=2
+LimitMEMLOCK=infinity
 # Default KillMode (control-group) would SIGTERM every QEMU child process
 # along with fluxvm itself on every restart/upgrade, killing every
 # running VM. `reconcile()` (fluxvm-scheduler) is explicitly designed to
@@ -62,7 +63,7 @@ PrivateTmp=true
 # /run/netns: per-VM network namespaces (NetworkSpec::Tap { netns: true })
 # persist as bind-mount targets there -- the standard iproute2/kernel
 # location, not something fluxvm can relocate.
-ReadWritePaths=/var/lib/fluxvm /run/fluxvm /var/lock /run/netns
+ReadWritePaths=/var/lib/fluxvm /run/fluxvm /var/lock /run/netns /sys/fs/bpf
 
 [Install]
 WantedBy=multi-user.target

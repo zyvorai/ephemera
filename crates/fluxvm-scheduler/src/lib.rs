@@ -135,7 +135,9 @@ fn validate_policy(req: &CreateVmRequest, cfg: &Config) -> Result<()> {
             fluxvm_core::model::NetworkSpec::Macvtap { .. } => "macvtap",
         };
         if !modes.iter().any(|m| m == mode) {
-            bail!("network mode '{mode}' is not permitted by policy allowed_network_modes {modes:?}");
+            bail!(
+                "network mode '{mode}' is not permitted by policy allowed_network_modes {modes:?}"
+            );
         }
     }
     if !p.allow_extra_args && !req.extra_args.is_empty() {
@@ -173,6 +175,12 @@ impl VmManager {
         // else, only resource-control/metrics for VMs it launches.
         if let Err(e) = fluxvm_cgroup::ensure_delegation() {
             tracing::warn!(error = %e, "failed to delegate cgroup controllers — resource control/metrics will be unavailable");
+        }
+        if let Err(e) = fluxvm_network::xdp::ensure(&cfg.sandbox.dataplane) {
+            if cfg.sandbox.dataplane.xdp.required {
+                return Err(e).context("initializing required FluxVM XDP guard");
+            }
+            tracing::warn!(error = %e, "FluxVM XDP guard unavailable; continuing without it");
         }
         Ok(Arc::new(Self {
             cfg,
@@ -429,6 +437,95 @@ impl VmManager {
         })
     }
 
+    pub async fn network_policy(
+        &self,
+        id: Uuid,
+    ) -> Result<fluxvm_network::dataplane::VmNetworkPolicy> {
+        self.get(id).await?;
+        let cfg = self.cfg.clone();
+        tokio::task::spawn_blocking(move || fluxvm_network::dataplane::effective_policy(&cfg, id))
+            .await
+            .context("network policy reader panicked")?
+    }
+
+    pub async fn set_network_policy(
+        &self,
+        id: Uuid,
+        policy: fluxvm_network::dataplane::VmNetworkPolicy,
+    ) -> Result<fluxvm_network::dataplane::VmNetworkPolicy> {
+        let vm = self.get(id).await?;
+        let previous = fluxvm_network::dataplane::load_policy(&self.cfg, id)?;
+        fluxvm_network::dataplane::save_policy(&self.cfg, id, &policy)?;
+
+        if vm.status == VmStatus::Running && vm.backend == BackendKind::FluxVm {
+            if let Some(ip) = vm.guest_ip.as_deref() {
+                let guest_cidr = format!("{ip}/32");
+                let iface = fluxvm_network::dataplane_interface_name(
+                    id,
+                    vm.netns.is_some(),
+                    vm.tap_name.as_deref(),
+                );
+                let extra = if self.cfg.sandbox.egress_allow_domains.is_empty() {
+                    vec![]
+                } else {
+                    fluxvm_network::egress::resolve_allow_cidrs(
+                        &self.cfg.sandbox.egress_allow_domains,
+                    )
+                    .await
+                };
+                if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(
+                    &self.cfg,
+                    id,
+                    iface.as_deref(),
+                    &guest_cidr,
+                    &extra,
+                ) {
+                    // Atomic control-plane semantics: restore prior policy on failure.
+                    match previous.as_ref() {
+                        Some(old) => {
+                            let _ = fluxvm_network::dataplane::save_policy(&self.cfg, id, old);
+                        }
+                        None => {
+                            let _ = fluxvm_network::dataplane::delete_policy(&self.cfg, id);
+                        }
+                    }
+                    let _ = fluxvm_network::dataplane::apply_sandbox_policy(
+                        &self.cfg,
+                        id,
+                        iface.as_deref(),
+                        &guest_cidr,
+                        &extra,
+                    );
+                    return Err(e).context("applying updated VM network policy");
+                }
+            }
+        }
+        Ok(policy)
+    }
+
+    pub async fn network_stats(
+        &self,
+        id: Uuid,
+    ) -> Result<fluxvm_network::dataplane::DataplaneStats> {
+        self.get(id).await?;
+        let cfg = self.cfg.clone();
+        tokio::task::spawn_blocking(move || fluxvm_network::dataplane::stats(&cfg, id))
+            .await
+            .context("network stats reader panicked")?
+    }
+
+    pub async fn network_flows(
+        &self,
+        id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<fluxvm_network::dataplane::FlowRecord>> {
+        self.get(id).await?;
+        let cfg = self.cfg.clone();
+        tokio::task::spawn_blocking(move || fluxvm_network::dataplane::flows(&cfg, id, limit))
+            .await
+            .context("network flow reader panicked")?
+    }
+
     pub async fn create(self: &Arc<Self>, mut req: CreateVmRequest) -> Result<VmRecord> {
         let started = std::time::Instant::now();
         // Resolve BackendKind::Auto before anything else — everything below
@@ -542,6 +639,7 @@ impl VmManager {
             // fluxvm_network::prepare has actually created the namespace
             // (see fluxvm_network::netns::NetnsHandle).
             let network = fluxvm_network::prepare(&self.cfg, id, &req.network).await?;
+            let dataplane_if = fluxvm_network::dataplane_interface(id, &network);
             record.tap_name = network.tap_name.clone();
             record.netns = network.netns.clone();
             record.dhcp_leasefile = network.dhcp_leasefile.clone();
@@ -575,6 +673,31 @@ impl VmManager {
                 .clone()
                 .or_else(|| record.guest_ip.as_ref().map(|ip| format!("{ip}/32")));
 
+            if req.backend == BackendKind::FluxVm {
+                if let Some(guest_cidr) = guest_cidr_for_policy.as_deref() {
+                    let allow_cidrs = if self.cfg.sandbox.egress_allow_domains.is_empty() {
+                        vec![]
+                    } else {
+                        fluxvm_network::egress::resolve_allow_cidrs(
+                            &self.cfg.sandbox.egress_allow_domains,
+                        )
+                        .await
+                    };
+                    if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(
+                        &self.cfg,
+                        id,
+                        dataplane_if.as_deref(),
+                        guest_cidr,
+                        &allow_cidrs,
+                    ) {
+                        if self.cfg.sandbox.dataplane.required {
+                            return Err(e).context("applying required VM dataplane before launch");
+                        }
+                        tracing::warn!(vm = %id, error = %e, "VM dataplane apply failed");
+                    }
+                }
+            }
+
             let ctx = LaunchContext {
                 id,
                 workspace: workspace.clone(),
@@ -598,32 +721,13 @@ impl VmManager {
             }
             Self::attach_cgroup(id, launch.pid, &mut record);
             record.status = VmStatus::Running;
-            if req.backend == BackendKind::FluxVm {
-                if !self.cfg.sandbox.egress_proxy_listen.is_empty() {
-                    if let Ok(addr) = self.cfg.sandbox.egress_proxy_listen.parse::<std::net::SocketAddr>()
-                    {
-                        if let Err(e) =
-                            fluxvm_network::egress::apply_egress_redirect(addr.port())
-                        {
-                            tracing::warn!(vm = %id, error = %e, "egress redirect nftables apply failed");
-                        }
-                    }
-                }
-                if let Some(guest_cidr) = guest_cidr_for_policy {
-                    let allow_cidrs = if self.cfg.sandbox.egress_allow_domains.is_empty() {
-                        vec![]
-                    } else {
-                        fluxvm_network::egress::resolve_allow_cidrs(
-                            &self.cfg.sandbox.egress_allow_domains,
-                        )
-                        .await
-                    };
-                    if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(
-                        id,
-                        &guest_cidr,
-                        &allow_cidrs,
-                    ) {
-                        tracing::warn!(vm = %id, error = %e, "nftables dataplane apply failed");
+            if req.backend == BackendKind::FluxVm
+                && !self.cfg.sandbox.egress_proxy_listen.is_empty()
+            {
+                if let Ok(addr) = self.cfg.sandbox.egress_proxy_listen.parse::<std::net::SocketAddr>()
+                {
+                    if let Err(e) = fluxvm_network::egress::apply_egress_redirect(addr.port()) {
+                        tracing::warn!(vm = %id, error = %e, "egress redirect nftables apply failed");
                     }
                 }
             }
@@ -632,16 +736,18 @@ impl VmManager {
         .await;
 
         if let Err(e) = result {
+            if req.backend == BackendKind::FluxVm {
+                let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, id);
+            }
             if let Some(tap) = &record.tap_name {
-                let _ =
-                    fluxvm_network::cleanup(
-                        &self.cfg.state_dir,
-                        id,
-                        &req.network,
-                        tap,
-                        record.netns.as_deref(),
-                    )
-                    .await;
+                let _ = fluxvm_network::cleanup(
+                    &self.cfg.state_dir,
+                    id,
+                    &req.network,
+                    tap,
+                    record.netns.as_deref(),
+                )
+                .await;
             }
             // A later step (network prep, launch) can fail after the disk
             // was already provisioned — don't leak the LV/qemu-nbd process.
@@ -771,10 +877,16 @@ impl VmManager {
 
         let result: Result<()> = async {
             let network = fluxvm_network::prepare(&self.cfg, id, &vm.request.network).await?;
+            let dataplane_if = fluxvm_network::dataplane_interface(id, &network);
             vm.tap_name = network.tap_name.clone();
             vm.netns = network.netns.clone();
             vm.dhcp_leasefile = network.dhcp_leasefile.clone();
             vm.guest_ip = network.guest_ip.clone();
+
+            let guest_cidr_for_policy = network
+                .guest_cidr
+                .clone()
+                .or_else(|| vm.guest_ip.as_ref().map(|ip| format!("{ip}/32")));
 
             let vsock_socket = match (vm.guest_cid, vm.backend) {
                 (Some(_), BackendKind::Qemu) => None,
@@ -786,6 +898,31 @@ impl VmManager {
             // there to reattach to — nothing to reprovision.
             let nbd_export =
                 (vm.request.storage == StorageBackend::Nbd).then(|| vm.workspace.join("nbd.sock"));
+
+            if vm.backend == BackendKind::FluxVm {
+                if let Some(guest_cidr) = guest_cidr_for_policy.as_deref() {
+                    let allow_cidrs = if self.cfg.sandbox.egress_allow_domains.is_empty() {
+                        vec![]
+                    } else {
+                        fluxvm_network::egress::resolve_allow_cidrs(
+                            &self.cfg.sandbox.egress_allow_domains,
+                        )
+                        .await
+                    };
+                    if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(
+                        &self.cfg,
+                        id,
+                        dataplane_if.as_deref(),
+                        guest_cidr,
+                        &allow_cidrs,
+                    ) {
+                        if self.cfg.sandbox.dataplane.required {
+                            return Err(e).context("applying required VM dataplane before restart");
+                        }
+                        tracing::warn!(vm = %id, error = %e, "VM dataplane re-apply failed");
+                    }
+                }
+            }
 
             let ctx = LaunchContext {
                 id,
@@ -825,6 +962,9 @@ impl VmManager {
         .await;
 
         if let Err(e) = result {
+            if vm.backend == BackendKind::FluxVm {
+                let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, id);
+            }
             if let Some(tap) = &vm.tap_name {
                 let _ = fluxvm_network::cleanup(
                     &self.cfg.state_dir,
@@ -867,16 +1007,18 @@ impl VmManager {
                 }
             }
         }
+        if vm.backend == BackendKind::FluxVm {
+            let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, id);
+        }
         if let Some(tap) = &vm.tap_name {
-            let _ =
-                fluxvm_network::cleanup(
-                    &self.cfg.state_dir,
-                    id,
-                    &vm.request.network,
-                    tap,
-                    vm.netns.as_deref(),
-                )
-                .await;
+            let _ = fluxvm_network::cleanup(
+                &self.cfg.state_dir,
+                id,
+                &vm.request.network,
+                tap,
+                vm.netns.as_deref(),
+            )
+            .await;
         }
         vm.netns = None;
         // virtiofsd instances aren't reattachable the way qemu-nbd's export
@@ -1104,8 +1246,9 @@ impl VmManager {
         }
         let vm = self.store.remove(id).await?.context("VM vanished")?;
         if vm.backend == BackendKind::FluxVm {
-            let _ = fluxvm_network::dataplane::remove_sandbox_policy(id);
+            let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, id);
         }
+        let _ = fluxvm_network::dataplane::delete_policy(&self.cfg, id);
         self.activity.lock().await.remove(&id);
         // These three point at live state outside `workspace` (a
         // still-active LV, a still-running qemu-nbd process, a Ceph clone)
@@ -1154,6 +1297,10 @@ impl VmManager {
                         let mut vm = vm;
                         vm.status = VmStatus::Stopped;
                         vm.pid = None;
+                        if vm.backend == BackendKind::FluxVm {
+                            let _ =
+                                fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, vm.id);
+                        }
                         if let Some(tap) = &vm.tap_name {
                             let _ = fluxvm_network::cleanup(
                                 &self.cfg.state_dir,

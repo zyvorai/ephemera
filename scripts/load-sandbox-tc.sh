@@ -2,9 +2,9 @@
 # Copyright 2026 Zyvor
 # SPDX-License-Identifier: Apache-2.0
 #
-# Stub TC hook for FluxVM sandbox dataplane. Called by fluxvm-network when
-# a sandbox nftables policy is applied. Replace with a real clsact/bpf program
-# when you have one compiled for your kernel.
+# Legacy stub — retained for operators who still call this script by hand.
+# The real TC/eBPF dataplane is `crates/fluxvm-network/src/ebpf.rs` (modes
+# `ebpf` / `cilium` under `[sandbox.dataplane]`). See docs/ebpf-cilium.md.
 #
 # Usage: load-sandbox-tc.sh <sandbox-uuid>
 
@@ -12,12 +12,6 @@ set -euo pipefail
 
 ID="${1:?sandbox uuid required}"
 
-if ! command -v tc >/dev/null 2>&1; then
-  echo "tc not installed — skipping TC attach for sandbox ${ID}" >&2
-  exit 0
-fi
-
-# Best-effort: log intent; operators can extend this script to attach bpf to
-# the TAP device for sandbox ${ID} once they know the interface name.
-echo "fluxvm: TC stub for sandbox ${ID} (no program loaded — extend this script)" >&2
+echo "fluxvm: load-sandbox-tc.sh is a no-op stub for ${ID}." >&2
+echo "fluxvm: enable [sandbox.dataplane] mode = \"ebpf\"|\"cilium\" and build via ./scripts/build-ebpf.sh" >&2
 exit 0

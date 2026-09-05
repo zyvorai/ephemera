@@ -22,7 +22,11 @@ enum Command {
         #[arg(long, env = "LISTEN", default_value = "0.0.0.0:7799")]
         listen: String,
         /// Directory for `fleet-nodes.json` persistence.
-        #[arg(long, env = "FLUXVM_AGENT_STATE_DIR", default_value = "/var/lib/fluxvm-agent")]
+        #[arg(
+            long,
+            env = "FLUXVM_AGENT_STATE_DIR",
+            default_value = "/var/lib/fluxvm-agent"
+        )]
         state_dir: PathBuf,
         /// Shared bearer token for `/fleet/*` (omit to leave auth off — lab only).
         #[arg(long, env = "FLUXVM_AGENT_TOKEN")]

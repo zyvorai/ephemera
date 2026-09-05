@@ -2,8 +2,7 @@
 
 Packages the `DisposableVm` CRD + node-local operator (see the root
 [README.md](../../README.md)'s "Kubernetes CRD/operator" section) as an
-actual Kubernetes workload — this directory is what that section refers to
-as "not yet done."
+actual Kubernetes workload.
 
 ## What this is, and isn't
 
@@ -28,9 +27,15 @@ Before labeling a node `ragnarok.io/fluxvm-capable=true`:
    `state_dir` in configmap.yaml) — there is no k8s-native image pull path
    yet (unlike, e.g., KubeVirt's `containerDisk`). Stage images with the
    same host-prep step that applies the label, or by hand for a first test.
-4. A per-node bridge if you intend to use `network_mode: tap` — not
-   supported by this CRD yet (see "Known limitations" below); MVP only
-   needs step 1-3 for `network_mode: user`.
+4. A per-node bridge if you intend to use `network_mode: tap` — stage
+   bridges/parents on the host the same way a bare-metal FluxVM deploy does.
+5. **Optional eBPF / Cilium dataplane (Network Fabric v1)**: the DaemonSet mounts
+   host `/sys/fs/bpf` and read-only `/var/run/cilium`, and grants `SYS_RESOURCE`
+   for BPF memlock. For `sandbox.dataplane.mode = "ebpf"` or `"cilium"`, ensure
+   the image includes `/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o` (and optionally
+   `fluxvm_xdp.bpf.o`; Dockerfile builds both) and set dataplane fields in the
+   ConfigMap. See [docs/network-fabric.md](../../docs/network-fabric.md) and
+   [docs/ebpf-cilium.md](../../docs/ebpf-cilium.md).
 
 ## Deploy order
 
@@ -100,3 +105,8 @@ Regenerate it whenever `crates/fluxvm-kube/src/crd.rs` changes.
   `spec.node` yourself (e.g. from Ragnarok's capable-nodes picker).
 - Tap/macvtap with `hostNetwork: true` interact with your CNI — stage
   bridges/parents on the host the same way a bare-metal FluxVM deploy does.
+- **eBPF dataplane** is opt-in (`legacy` nftables remains default). Cilium mode
+  only verifies agent presence; it does not turn FluxVM VMs into Cilium
+  endpoints. L4 policy / stats / flows / optional XDP:
+  [docs/network-fabric.md](../../docs/network-fabric.md),
+  [docs/ebpf-cilium.md](../../docs/ebpf-cilium.md).

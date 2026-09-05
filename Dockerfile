@@ -27,7 +27,7 @@ FROM docker.io/library/rust:1.89-bookworm AS builder
 # repo's own CI hits and works around the exact same gap (see
 # .github/workflows/ci.yml).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libsystemd-dev libhivex-dev pkg-config \
+    libsystemd-dev libhivex-dev pkg-config clang llvm libbpf-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -36,6 +36,7 @@ COPY --from=guestkit . ./guestkit
 
 WORKDIR /build/fluxvm
 RUN cargo build --locked --release -p fluxvm-cli -p fluxvm-kube -p fluxvm-hypervisor
+RUN ./scripts/build-ebpf.sh
 
 FROM docker.io/library/debian:bookworm-slim AS runtime
 
@@ -46,7 +47,7 @@ FROM docker.io/library/debian:bookworm-slim AS runtime
 # GitHub Releases API response with it (see those scripts).
 # ca-certificates / curl: release-asset download + SHA-256 verification.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    qemu-system-x86 qemu-utils cloud-image-utils iproute2 dnsmasq \
+    qemu-system-x86 qemu-utils cloud-image-utils iproute2 dnsmasq nftables bpftool \
     python3 ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -58,5 +59,7 @@ RUN bash /tmp/install-cloud-hypervisor.sh \
 COPY --from=builder /build/fluxvm/target/release/fluxvm /usr/local/bin/fluxvm
 COPY --from=builder /build/fluxvm/target/release/fluxvm-kube /usr/local/bin/fluxvm-kube
 COPY --from=builder /build/fluxvm/target/release/fluxvm-hypervisor /usr/local/bin/fluxvm-hypervisor
+COPY --from=builder /build/fluxvm/dist/bpf/fluxvm_tc.bpf.o /usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o
+COPY --from=builder /build/fluxvm/dist/bpf/fluxvm_xdp.bpf.o /usr/lib/fluxvm/bpf/fluxvm_xdp.bpf.o
 
 ENTRYPOINT []
