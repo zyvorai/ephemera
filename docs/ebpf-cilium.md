@@ -19,12 +19,12 @@ README diagrams:
 Default remains `sandbox.dataplane.mode = "legacy"`. Existing configs that omit
 `[sandbox.dataplane]` keep using nftables.
 
-Dataplane apply runs on **FluxVm** (`backend: "flux-vm"`) create/start/restart
-for the host-visible interface (guest CIDR optional on the native path). If
-`required = false` (default) and eBPF load/attach fails, FluxVM logs a warning
-and falls back to nftables **only when policy semantics can be preserved**.
-IPv6 CIDRs and Mbps/PPS limits are native-only and refuse silent nftables
-downgrade. If `required = true`, create/start fails on attach error.
+Dataplane attach / teardown / reconfigure / reconcile runs for **all** backends
+(QEMU, Cloud Hypervisor, Firecracker, FluxVm) when a host-visible interface
+exists. If there is no iface and no guest CIDR (e.g. `network.mode=none` or
+user NAT) and `required = false`, attach soft-skips. If `required = true`,
+create/start fails on attach error. IPv6 CIDRs and Mbps/PPS limits are
+native-only and refuse silent nftables downgrade.
 
 ## How coexistence fits
 

@@ -579,10 +579,12 @@ bpffs, and `LimitMEMLOCK` are already wired for compose/k8s/systemd.
 
 ## Network Fabric architecture (how it works)
 
-This is the detailed picture for **Network Fabric v3** on the FluxVm track
-(`backend: "flux-vm"`). Netns NAT (`fluxvm_netns_*` nftables) is independent and
-always available for namespaced networking; the fabric decides **egress allow /
-rate / telemetry** at the host-visible VM edge.
+This is the detailed picture for **Network Fabric v3**. Attach / teardown /
+reconfigure / reconcile apply to **all backends** (QEMU, Cloud Hypervisor,
+Firecracker, FluxVm) when a host-visible iface exists. Netns NAT
+(`fluxvm_netns_*` nftables) is independent and always available for namespaced
+networking; the fabric decides **egress allow / rate / telemetry** at the
+host-visible VM edge.
 
 ### Big picture
 
@@ -667,28 +669,28 @@ flowchart TD
 
 ```mermaid
 sequenceDiagram
-  participant Op as Operator / API
+  participant Op as Operator or API
   participant Sch as Scheduler
-  participant Dp as dataplane/ebpf
-  participant Kern as Kernel TC+maps
+  participant Dp as dataplane eBPF
+  participant Kern as Kernel TC maps
 
-  Op->>Sch: create/start FluxVm
-  Sch->>Dp: apply_sandbox_policy(iface, policy)
-  Dp->>Kern: load+pin prog/maps
-  Dp->>Kern: write fluxvm_id + CIDR/L4/rate maps
-  Dp->>Kern: tc filter add (after maps ready)
-  Dp->>Dp: write /run meta + commit fingerprint
+  Op->>Sch: create or start VM
+  Sch->>Dp: apply_sandbox_policy
+  Dp->>Kern: load and pin prog maps
+  Dp->>Kern: write fluxvm_id CIDR L4 rate maps
+  Dp->>Kern: tc filter add after maps ready
+  Dp->>Dp: write run meta and fingerprint
 
-  Op->>Sch: POST /network/policy
+  Op->>Sch: POST network policy
   Sch->>Dp: reconfigure_sandbox_policy
   Dp->>Kern: deny-all on iface
-  Dp->>Kern: replace CIDR/L4/rate maps
+  Dp->>Kern: replace CIDR L4 rate maps
   Dp->>Kern: publish final iface config
-  Note over Dp,Kern: May over-deny briefly; never allow-all gap
+  Note over Dp,Kern: Brief over-deny window only never allow-all
 
   Sch->>Dp: reconcile tick
-  Dp->>Dp: status: attached / schema / policy_synced?
-  alt needs repair
+  Dp->>Dp: check attached schema policy_synced
+  alt needsRepair
     Dp->>Kern: ensure_sandbox_policy reload
   end
   Dp->>Dp: reconcile_orphan_pins for dead UUIDs

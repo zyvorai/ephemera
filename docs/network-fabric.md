@@ -10,6 +10,11 @@ For a **customer-facing speed comparison** vs traditional VM firewalls / bridges
 user-mode NAT (plus lab policy-update numbers), see
 [Why Network Fabric is faster](../README.md#why-network-fabric-is-faster-than-traditional-vm-networking).
 
+When operated through [Zyvor Fabric](https://github.com/zyvorai/fabric), the same
+APIs are proxied name-keyed as `/api/vms/{name}/dataplane/*`, with a **Dataplane**
+Web tab and `zyvorctl dataplane` — see Fabric’s
+[fluxvm-dataplane.md](https://github.com/zyvorai/fabric/blob/main/docs/guides/vm-drivers/fluxvm-dataplane.md).
+
 ## Architecture (how it works)
 
 ```mermaid
@@ -191,8 +196,30 @@ Status includes mode, fail-closed requirement, attachment/interface, stable
 identity, pin directory, BPF schema version/compatibility, policy-sync status,
 and effective policy.
 
-Flow records contain `family` (`4` or `6`), source/destination strings, ports,
-protocol, verdict, packets, bytes and `last_seen_ns`.
+Flow records contain `identity`, `family` (`4` or `6`), source/destination
+strings, ports, protocol, verdict, packets, bytes and `last_seen_ns`.
+
+### Attachment backends
+
+The scheduler applies dataplane attach / teardown / reconfigure / reconcile for
+**all** VMM backends (QEMU, Cloud Hypervisor, Firecracker, FluxVm) whenever a
+host-visible interface is present. Create with `network.mode=none` or user NAT
+and no iface soft-skips when `required = false`.
+
+### Fabric control plane (optional)
+
+| Fabric | FluxVM |
+|--------|--------|
+| `GET/POST /api/vms/{name}/dataplane/policy` | `…/network/policy` |
+| `GET /api/vms/{name}/dataplane/status` | `…/network/status` |
+| `GET /api/vms/{name}/dataplane/stats` | `…/network/stats` |
+| `GET /api/vms/{name}/dataplane/flows` | `…/network/flows` |
+
+Web: VM → **Dataplane**. CLI: `zyvorctl dataplane` (`ZYVOR_FABRIC_URL` +
+`ZYVOR_FABRIC_TOKEN` for HTTPS). Capability card: `GET /api/capabilities` →
+`vm_dataplane`.
+
+Ports in policy **must** be `tcp/PORT` or `udp/PORT`.
 
 For a dependency-free NDJSON stream suitable for piping into Vector, Fluent
 Bit, Kafka producers or another collector:
@@ -288,6 +315,19 @@ The kernel smoke covers:
 The GitHub workflow additionally builds the full Rust workspace, runs all Rust
 unit tests, builds both BPF objects with real libbpf headers, and executes the
 privileged smoke test.
+
+### Lab regression notes (operator)
+
+On the Zyvor lab host, official Network Fabric e2e (`test-network-fabric.sh`)
+and Fabric HTTPS dataplane paths are green when `mode=ebpf` and VMs use
+TAP+netns. Known independent lab gaps (not dataplane ABI regressions):
+
+- Netns guest→host veth ping can fail under some eBPF↔NAT combinations.
+- Cgroup freeze/stats may fail if cgroup setup was skipped at launch.
+- Warm-pool second `serve` can clash with systemd-bound FluxVM port.
+
+Fabric console UX (Status / Policy save / Stats / Flows + dashboard capability)
+has been verified end-to-end against attached schema v3 VMs.
 
 ## What should be separate after v3
 
