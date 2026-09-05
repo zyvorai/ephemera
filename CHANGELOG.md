@@ -24,7 +24,8 @@
 ### Changed
 - Docs/README refreshed for Network Fabric v1–v3 (architecture diagrams, L4 ports,
   IPv6, rate limits, REST status/schema, XDP meta paths, `LimitMEMLOCK`, dual-netns
-  smoke, e2e).
+  smoke, e2e) plus a **vs traditional networking** comparison table (lab policy
+  update ~100–120 ms p50).
 
 ## 0.3.0
 
