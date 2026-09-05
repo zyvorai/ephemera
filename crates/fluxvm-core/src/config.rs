@@ -152,7 +152,8 @@ pub struct DataplaneConfig {
     /// Default action when no CIDR entry matches. `true` preserves the
     /// pre-eBPF allow-all behavior until an operator opts into deny-by-default.
     pub default_allow: bool,
-    /// IPv4 destination CIDRs allowed by the native eBPF LPM trie.
+    /// IPv4/IPv6 destination CIDRs allowed by the native eBPF LPM tries.
+    /// IPv6 policy is native-only and will not silently downgrade to nftables.
     pub allow_cidrs: Vec<String>,
     /// L4 allowlist entries (`tcp/443`, `udp/53`, …).
     pub allow_ports: Vec<String>,
@@ -192,6 +193,7 @@ pub struct XdpConfig {
     pub bpf_object: PathBuf,
     pub pin_root: PathBuf,
     pub required: bool,
+    /// IPv4/IPv6 source CIDRs rejected at XDP.
     pub block_cidrs: Vec<String>,
 }
 

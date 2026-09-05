@@ -345,8 +345,8 @@ META="/run/fluxvm/ebpf/vms/${SIMPLE}/iface"
 section "REST status / policy / stats / flows"
 # ---------------------------------------------------------------------------
 STATUS=$(api GET "/v1/vms/${ID}/network/status")
-echo "$STATUS" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d.get("mode")=="ebpf"; assert d.get("identity"); print("ok")' >/dev/null \
-  && pass "GET network/status mode=ebpf" \
+echo "$STATUS" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d.get("mode")=="ebpf"; assert d.get("identity"); assert d.get("schema_compatible") is True; assert d.get("schema_version")==3; print("ok")' >/dev/null \
+  && pass "GET network/status mode=ebpf schema_v3" \
   || fail "GET network/status unexpected: $STATUS"
 
 POLICY=$(api GET "/v1/vms/${ID}/network/policy")

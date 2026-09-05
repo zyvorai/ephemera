@@ -457,8 +457,15 @@ impl VmManager {
         let previous = fluxvm_network::dataplane::load_policy(&self.cfg, id)?;
         fluxvm_network::dataplane::save_policy(&self.cfg, id, &policy)?;
 
-        if vm.status == VmStatus::Running && vm.backend == BackendKind::FluxVm {
+        if (vm.status == VmStatus::Running || vm.status == VmStatus::Paused)
+            && vm.backend == BackendKind::FluxVm
+        {
             let guest_cidr = vm.guest_ip.as_deref().map(|ip| format!("{ip}/32"));
+            let iface = fluxvm_network::dataplane_interface_name(
+                id,
+                vm.netns.is_some(),
+                vm.tap_name.as_deref(),
+            );
             let extra = if self.cfg.sandbox.egress_allow_domains.is_empty() {
                 vec![]
             } else {
@@ -468,10 +475,11 @@ impl VmManager {
             if let Err(e) = fluxvm_network::dataplane::reconfigure_sandbox_policy(
                 &self.cfg,
                 id,
+                iface.as_deref(),
                 guest_cidr.as_deref(),
                 &extra,
             ) {
-                // Atomic control-plane semantics: restore prior policy on failure.
+                // Restore both durable control-plane state and kernel state.
                 match previous.as_ref() {
                     Some(old) => {
                         let _ = fluxvm_network::dataplane::save_policy(&self.cfg, id, old);
@@ -483,6 +491,7 @@ impl VmManager {
                 let _ = fluxvm_network::dataplane::reconfigure_sandbox_policy(
                     &self.cfg,
                     id,
+                    iface.as_deref(),
                     guest_cidr.as_deref(),
                     &extra,
                 );
@@ -1293,7 +1302,7 @@ impl VmManager {
     pub async fn reconcile(&self) -> Result<()> {
         let now = Utc::now();
         for vm in self.store.list().await {
-            if vm.status == VmStatus::Running {
+            if vm.status == VmStatus::Running || vm.status == VmStatus::Paused {
                 if let Some(pid) = vm.pid {
                     if !process::process_alive(pid).await {
                         let mut vm = vm;
@@ -1320,6 +1329,50 @@ impl VmManager {
                             }
                         }
                         self.store.update(vm).await?;
+                        continue;
+                    }
+
+                    // Daemon restart / package upgrades can leave a live VMM
+                    // while TC pins/filters are missing or on an older schema.
+                    if vm.backend == BackendKind::FluxVm
+                        && self.cfg.sandbox.dataplane.mode
+                            != fluxvm_core::config::DataplaneMode::Legacy
+                    {
+                        let needs_repair = fluxvm_network::dataplane::status(&self.cfg, vm.id)
+                            .map(|s| !s.attached || !s.schema_compatible || !s.policy_synced)
+                            .unwrap_or(true);
+                        if needs_repair {
+                            let iface = fluxvm_network::dataplane_interface_name(
+                                vm.id,
+                                vm.netns.is_some(),
+                                vm.tap_name.as_deref(),
+                            );
+                            let extra = if self.cfg.sandbox.egress_allow_domains.is_empty() {
+                                vec![]
+                            } else {
+                                fluxvm_network::egress::resolve_allow_cidrs(
+                                    &self.cfg.sandbox.egress_allow_domains,
+                                )
+                                .await
+                            };
+                            match fluxvm_network::dataplane::ensure_sandbox_policy(
+                                &self.cfg,
+                                vm.id,
+                                iface.as_deref(),
+                                &extra,
+                            ) {
+                                Ok(true) => tracing::info!(
+                                    vm = %vm.id,
+                                    "repaired FluxVM eBPF dataplane attachment"
+                                ),
+                                Ok(false) => {}
+                                Err(e) => tracing::warn!(
+                                    vm = %vm.id,
+                                    error = %e,
+                                    "failed to repair FluxVM eBPF dataplane"
+                                ),
+                            }
+                        }
                     }
                 }
             } else if vm.status == VmStatus::Creating && now - vm.created_at > STUCK_CREATING_GRACE
@@ -1336,6 +1389,19 @@ impl VmManager {
                 tracing::warn!(vm=%vm.id, "cleaning up a VM stuck in Creating status — its creating process likely crashed");
                 let _ = self.delete(vm.id).await;
             }
+        }
+
+        // Stale UUID pins are safe to collect only after the VM record is gone.
+        let live_ids: Vec<Uuid> = self
+            .store
+            .list()
+            .await
+            .into_iter()
+            .filter(|vm| vm.backend == BackendKind::FluxVm)
+            .map(|vm| vm.id)
+            .collect();
+        if let Err(e) = fluxvm_network::dataplane::reconcile_orphan_pins(&self.cfg, &live_ids) {
+            tracing::warn!(error = %e, "failed to reconcile orphan FluxVM eBPF pins");
         }
         Ok(())
     }

@@ -10,7 +10,7 @@
 use anyhow::{Context, Result};
 use fluxvm_core::config::{Config, DataplaneMode};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf, process::Command};
+use std::{fs, io::Write, path::PathBuf, process::Command};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -23,6 +23,8 @@ pub struct VmNetworkPolicy {
     /// is non-empty it becomes an explicit allowlist and unmatched traffic
     /// is denied, regardless of this value.
     pub default_allow: bool,
+    /// IPv4 and IPv6 destination CIDRs. IPv6 requires native eBPF mode;
+    /// legacy nftables fallback intentionally refuses mixed-family policy.
     pub allow_cidrs: Vec<String>,
     /// Entries are `tcp/443`, `udp/53`, etc. If CIDRs and ports are both
     /// configured, a packet must match both dimensions.
@@ -86,10 +88,22 @@ pub fn save_policy(cfg: &Config, id: Uuid, policy: &VmNetworkPolicy) -> Result<(
     fs::create_dir_all(parent)
         .with_context(|| format!("creating network policy directory {}", parent.display()))?;
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, serde_json::to_vec_pretty(policy)?)
-        .with_context(|| format!("writing temporary network policy {}", tmp.display()))?;
+    let bytes = serde_json::to_vec_pretty(policy)?;
+    {
+        let mut file = fs::File::create(&tmp)
+            .with_context(|| format!("creating temporary network policy {}", tmp.display()))?;
+        file.write_all(&bytes)
+            .with_context(|| format!("writing temporary network policy {}", tmp.display()))?;
+        file.sync_all()
+            .with_context(|| format!("syncing temporary network policy {}", tmp.display()))?;
+    }
     fs::rename(&tmp, &path)
         .with_context(|| format!("committing network policy {}", path.display()))?;
+    // Make the rename durable as well as atomic. This matters because policy
+    // is a security control and the VMM may intentionally outlive the daemon.
+    fs::File::open(parent)
+        .and_then(|dir| dir.sync_all())
+        .with_context(|| format!("syncing network policy directory {}", parent.display()))?;
     Ok(())
 }
 
@@ -108,6 +122,20 @@ fn policy_path(cfg: &Config, id: Uuid) -> PathBuf {
         .join(format!("{id}.json"))
 }
 
+/// Stable dependency-free fingerprint of the durable policy. Transient
+/// DNS-resolved extra CIDRs are intentionally excluded: this marker answers
+/// whether the persisted control-plane generation reached the kernel, not
+/// whether DNS answers changed since the last resolution.
+pub fn policy_fingerprint(policy: &VmNetworkPolicy) -> Result<u64> {
+    let bytes = serde_json::to_vec(policy)?;
+    let mut hash = 0xcbf29ce484222325u64; // FNV-1a 64-bit offset basis
+    for byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    Ok(hash)
+}
+
 pub fn apply_sandbox_policy(
     cfg: &Config,
     id: Uuid,
@@ -116,7 +144,9 @@ pub fn apply_sandbox_policy(
     extra_allow_cidrs: &[String],
 ) -> Result<()> {
     let dp = &cfg.sandbox.dataplane;
-    let mut policy = effective_policy(cfg, id)?;
+    let base_policy = effective_policy(cfg, id)?;
+    let base_fingerprint = policy_fingerprint(&base_policy)?;
+    let mut policy = base_policy;
     policy.allow_cidrs.extend_from_slice(extra_allow_cidrs);
     policy.allow_cidrs.sort();
     policy.allow_cidrs.dedup();
@@ -136,7 +166,10 @@ pub fn apply_sandbox_policy(
             })();
 
             match native {
-                Ok(()) => Ok(()),
+                Ok(()) => {
+                    crate::ebpf::commit_policy_fingerprint(id, base_fingerprint)?;
+                    Ok(())
+                }
                 Err(e) if dp.required || policy_uses_native_only_features(&policy) => Err(e),
                 Err(e) => {
                     warn!(
@@ -162,26 +195,40 @@ pub fn apply_sandbox_policy(
 pub fn reconfigure_sandbox_policy(
     cfg: &Config,
     id: Uuid,
+    iface: Option<&str>,
     guest_cidr: Option<&str>,
     extra_allow_cidrs: &[String],
 ) -> Result<()> {
     let dp = &cfg.sandbox.dataplane;
-    let mut policy = effective_policy(cfg, id)?;
+    let base_policy = effective_policy(cfg, id)?;
+    let base_fingerprint = policy_fingerprint(&base_policy)?;
+    let mut policy = base_policy;
     policy.allow_cidrs.extend_from_slice(extra_allow_cidrs);
     policy.allow_cidrs.sort();
     policy.allow_cidrs.dedup();
 
     match dp.mode {
         DataplaneMode::Legacy => {
-            let cidr = guest_cidr
-                .context("legacy nftables policy update requires a FluxVM-known guest CIDR")?;
+            let cidr = guest_cidr.context(
+                "legacy nftables policy update requires a FluxVM-known guest CIDR",
+            )?;
             apply_nftables(id, cidr, &policy)
-        }
+        },
         DataplaneMode::Ebpf | DataplaneMode::Cilium => {
             if dp.mode == DataplaneMode::Cilium {
                 crate::cilium::validate_host()?;
             }
-            crate::ebpf::reconfigure(dp, &policy, id)
+            let status = crate::ebpf::attachment_status(dp, id)?;
+            if status.attached {
+                crate::ebpf::reconfigure(dp, &policy, id)?;
+            } else {
+                let iface = iface.context(
+                    "native policy update needs a host-visible VM interface to repair attachment",
+                )?;
+                crate::ebpf::apply(dp, &policy, id, iface)?;
+            }
+            crate::ebpf::commit_policy_fingerprint(id, base_fingerprint)?;
+            Ok(())
         }
     }
 }
@@ -194,12 +241,18 @@ pub struct DataplaneStatus {
     pub interface: Option<String>,
     pub identity: u32,
     pub pin_dir: Option<String>,
+    pub schema_version: Option<u32>,
+    pub schema_compatible: bool,
+    /// True only when the durable policy generation is known to have been
+    /// fully committed to the currently attached kernel maps.
+    pub policy_synced: bool,
     pub policy: VmNetworkPolicy,
 }
 
 pub fn status(cfg: &Config, id: Uuid) -> Result<DataplaneStatus> {
     let dp = &cfg.sandbox.dataplane;
     let policy = effective_policy(cfg, id)?;
+    let desired_fingerprint = policy_fingerprint(&policy)?;
     let mode = match dp.mode {
         DataplaneMode::Legacy => "legacy",
         DataplaneMode::Ebpf => "ebpf",
@@ -215,6 +268,9 @@ pub fn status(cfg: &Config, id: Uuid) -> Result<DataplaneStatus> {
             interface: None,
             identity: crate::ebpf::identity_for(id),
             pin_dir: None,
+            schema_version: None,
+            schema_compatible: true,
+            policy_synced: true,
             policy,
         });
     }
@@ -227,12 +283,59 @@ pub fn status(cfg: &Config, id: Uuid) -> Result<DataplaneStatus> {
         interface: native.interface,
         identity: native.identity,
         pin_dir: Some(native.pin_dir),
+        schema_version: native.schema_version,
+        schema_compatible: native.schema_compatible,
+        policy_synced: native.policy_fingerprint == Some(desired_fingerprint),
         policy,
     })
 }
 
 fn policy_uses_native_only_features(policy: &VmNetworkPolicy) -> bool {
-    policy.max_egress_mbps.is_some() || policy.max_egress_pps.is_some()
+    policy.max_egress_mbps.is_some()
+        || policy.max_egress_pps.is_some()
+        || crate::ebpf::policy_contains_ipv6(policy)
+}
+
+/// Heal a missing/stale native TC attachment without disturbing a healthy
+/// one. Called by scheduler reconciliation for running FluxVm VMs.
+pub fn ensure_sandbox_policy(
+    cfg: &Config,
+    id: Uuid,
+    iface: Option<&str>,
+    extra_allow_cidrs: &[String],
+) -> Result<bool> {
+    let dp = &cfg.sandbox.dataplane;
+    if dp.mode == DataplaneMode::Legacy {
+        return Ok(false);
+    }
+    if dp.mode == DataplaneMode::Cilium {
+        crate::cilium::validate_host()?;
+    }
+    let iface = iface.context("eBPF reconcile needs a host-visible VM interface")?;
+    let base_policy = effective_policy(cfg, id)?;
+    let desired_fingerprint = policy_fingerprint(&base_policy)?;
+    let mut policy = base_policy;
+    policy.allow_cidrs.extend_from_slice(extra_allow_cidrs);
+    policy.allow_cidrs.sort();
+    policy.allow_cidrs.dedup();
+
+    let status = crate::ebpf::attachment_status(dp, id)?;
+    if status.attached
+        && status.interface.as_deref() == Some(iface)
+        && status.policy_fingerprint == Some(desired_fingerprint)
+    {
+        return Ok(false);
+    }
+    crate::ebpf::apply(dp, &policy, id, iface)?;
+    crate::ebpf::commit_policy_fingerprint(id, desired_fingerprint)?;
+    Ok(true)
+}
+
+pub fn reconcile_orphan_pins(cfg: &Config, live_ids: &[Uuid]) -> Result<usize> {
+    if cfg.sandbox.dataplane.mode == DataplaneMode::Legacy {
+        return Ok(0);
+    }
+    crate::ebpf::reconcile_orphan_pins(&cfg.sandbox.dataplane, live_ids)
 }
 
 pub fn remove_sandbox_policy(cfg: &Config, id: Uuid) -> Result<()> {
@@ -275,29 +378,11 @@ pub fn apply_subnet_masquerade(table: &str, source_cidr: &str) -> Result<()> {
     let _ = run_nft(&["delete", "table", "inet", table]);
     run_nft(&["add", "table", "inet", table])?;
     run_nft(&[
-        "add",
-        "chain",
-        "inet",
-        table,
-        "postrouting",
-        "{",
-        "type",
-        "nat",
-        "hook",
-        "postrouting",
-        "priority",
-        "srcnat;",
-        "}",
+        "add", "chain", "inet", table, "postrouting", "{", "type", "nat", "hook",
+        "postrouting", "priority", "srcnat;", "}",
     ])?;
     run_nft(&[
-        "add",
-        "rule",
-        "inet",
-        table,
-        "postrouting",
-        "ip",
-        "saddr",
-        source_cidr,
+        "add", "rule", "inet", table, "postrouting", "ip", "saddr", source_cidr,
         "masquerade",
     ])?;
     Ok(())
@@ -306,7 +391,7 @@ pub fn apply_subnet_masquerade(table: &str, source_cidr: &str) -> Result<()> {
 fn apply_nftables(id: Uuid, guest_cidr: &str, policy: &VmNetworkPolicy) -> Result<()> {
     if policy_uses_native_only_features(policy) {
         anyhow::bail!(
-            "max_egress_mbps/max_egress_pps require sandbox.dataplane.mode=ebpf or cilium"
+            "IPv6 CIDR and egress rate-limit policy require sandbox.dataplane.mode=ebpf or cilium"
         );
     }
     let table = format!("fluxvm_{}", id.simple());
@@ -337,8 +422,8 @@ fn apply_nftables(id: Uuid, guest_cidr: &str, policy: &VmNetworkPolicy) -> Resul
             (true, false) => {
                 for cidr in &policy.allow_cidrs {
                     run_nft(&[
-                        "add", "rule", "inet", &table, "forward", "ip", "saddr", guest_cidr, "ip",
-                        "daddr", cidr, "accept",
+                        "add", "rule", "inet", &table, "forward", "ip", "saddr", guest_cidr,
+                        "ip", "daddr", cidr, "accept",
                     ])?;
                 }
             }
@@ -347,8 +432,8 @@ fn apply_nftables(id: Uuid, guest_cidr: &str, policy: &VmNetworkPolicy) -> Resul
                     let (proto, port) = parse_nft_port_rule(rule)?;
                     let port = port.to_string();
                     run_nft(&[
-                        "add", "rule", "inet", &table, "forward", "ip", "saddr", guest_cidr, proto,
-                        "dport", &port, "accept",
+                        "add", "rule", "inet", &table, "forward", "ip", "saddr", guest_cidr,
+                        proto, "dport", &port, "accept",
                     ])?;
                 }
             }
@@ -357,15 +442,8 @@ fn apply_nftables(id: Uuid, guest_cidr: &str, policy: &VmNetworkPolicy) -> Resul
 
         if has_cidrs || has_ports {
             run_nft(&[
-                "add",
-                "rule",
-                "inet",
-                &table,
-                "forward",
-                "ct",
-                "state",
-                "established,related",
-                "accept",
+                "add", "rule", "inet", &table, "forward", "ct", "state",
+                "established,related", "accept",
             ])?;
         }
     }
@@ -474,4 +552,22 @@ mod tests {
         assert!(save_policy(&cfg, id, &policy).is_err());
         assert!(!policy_path(&cfg, id).exists());
     }
+    #[test]
+    fn ipv6_policy_requires_native_dataplane() {
+        let p = VmNetworkPolicy {
+            allow_cidrs: vec!["2001:db8::/32".into()],
+            ..VmNetworkPolicy::default()
+        };
+        assert!(policy_uses_native_only_features(&p));
+    }
+
+    #[test]
+    fn policy_fingerprint_changes_with_security_semantics() {
+        let base = VmNetworkPolicy::default();
+        let mut changed = base.clone();
+        changed.default_allow = false;
+        assert_ne!(policy_fingerprint(&base).unwrap(), policy_fingerprint(&changed).unwrap());
+        assert_eq!(policy_fingerprint(&base).unwrap(), policy_fingerprint(&base).unwrap());
+    }
+
 }

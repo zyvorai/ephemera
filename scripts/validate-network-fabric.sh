@@ -17,6 +17,9 @@ bash -n scripts/test-ebpf-smoke.sh
 bash -n scripts/test-network-fabric.sh
 bash -n scripts/validate-network-fabric.sh
 
+echo "==> Python flow-exporter tests"
+python3 scripts/test_flow_exporter.py
+
 if need clang && [[ -f /usr/include/bpf/bpf_helpers.h ]]; then
   echo "==> eBPF object build"
   ./scripts/build-ebpf.sh
@@ -37,7 +40,6 @@ else
   echo "SKIP Rust compile/tests: cargo not installed"
 fi
 
-# Wire into the fabric validator when privileged.
 if [[ "${FLUXVM_PRIVILEGED_SMOKE:-0}" == "1" ]]; then
   echo "==> privileged kernel smoke"
   if [[ "$EUID" -eq 0 ]]; then
