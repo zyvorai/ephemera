@@ -16,7 +16,7 @@ use std::{
     fs,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
 };
 use tracing::info;
 use uuid::Uuid;
@@ -901,11 +901,18 @@ fn require_tc() -> Result<()> {
 }
 
 fn require_version(name: &str, args: &[&str]) -> Result<()> {
-    let status = Command::new(name).args(args).status();
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => bail!("{} {} exited with {s}", name, args.join(" ")),
-        Err(e) => Err(e).with_context(|| format!("{name} is required for the eBPF dataplane")),
+    // Capture output: bpftool/tc print version banners on stdout, which would
+    // otherwise pollute `fluxvm create` JSON on the CLI.
+    let out = Command::new(name)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .with_context(|| format!("{name} is required for the eBPF dataplane"))?;
+    if out.success() {
+        Ok(())
+    } else {
+        bail!("{} {} exited with {out}", name, args.join(" "))
     }
 }
 

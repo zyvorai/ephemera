@@ -14,7 +14,7 @@ use std::{
     fs,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     path::Path,
-    process::Command,
+    process::{Command, Stdio},
 };
 use tracing::info;
 
@@ -446,10 +446,17 @@ fn require_ip() -> Result<()> {
 }
 
 fn require_version(name: &str, args: &[&str]) -> Result<()> {
-    match Command::new(name).args(args).status() {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => bail!("{} {} exited with {s}", name, args.join(" ")),
-        Err(e) => Err(e).with_context(|| format!("{name} is required")),
+    // Capture/discard banners: bpftool/ip print version text on stdout.
+    let status = Command::new(name)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .with_context(|| format!("{name} is required"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        bail!("{} {} exited with {status}", name, args.join(" "))
     }
 }
 
