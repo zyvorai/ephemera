@@ -38,9 +38,10 @@ reaper_interval_secs = 5
 # default_allow = true
 # allow_cidrs = ["10.0.0.0/8"]
 # allow_ports = ["tcp/443", "udp/53"]
-# sample_rate = 100
+# sample_rate = 100                     # 0 = off; N ≈ 1/N allowed-flow samples
 #
-# Standalone node-ingress XDP blocklist. Leave disabled with Cilium.
+# Standalone node-ingress XDP blocklist. Leave disabled with Cilium
+# (mode = "cilium" refuses XDP; meta under /run/fluxvm/xdp/).
 # [sandbox.dataplane.xdp]
 # enabled = false
 # interface = "eno1"

@@ -14,6 +14,15 @@
 - **QEMU placement** — optional `numa_node`, `cpuset`, `hugepages`, `vfio_devices` on create.
 - Richer Prometheus metrics (auth/egress denies, create/start latency).
 
+### Fixed
+- **eBPF smoke** — `scripts/test-ebpf-smoke.sh` uses dual netns and one persistent
+  `ip netns exec` session so policy/XDP checks work on hosts where same-netns
+  `ping -I` fails and `/sys` remounts drop bpffs pins across separate execs.
+
+### Changed
+- Docs/README refreshed for Network Fabric v1 (L4 ports, REST, XDP meta paths,
+  `LimitMEMLOCK`, dual-netns smoke).
+
 ## 0.3.0
 
 ### Added

@@ -3,38 +3,45 @@
 FluxVM ships a real TC/eBPF VM-edge dataplane while keeping the existing
 nftables path as the **backwards-compatible default**.
 
+For L4 ports, per-VM policy/stats/flows APIs, and optional XDP, see
+[network-fabric.md](network-fabric.md).
+
 ## Modes
 
 | Mode | Behavior |
 |------|----------|
-| `legacy` (default) | Existing per-sandbox nftables SNAT + optional destination allowlist. |
-| `ebpf` | Load FluxVM’s TC classifier (`bpf/fluxvm_tc.bpf.c`), pin programs/maps under `pin_root`, attach to the host-visible VM interface. L4/ports, policy API, stats/flows, XDP: [network-fabric.md](network-fabric.md). |
+| `legacy` (default) | Existing per-sandbox nftables SNAT + optional destination allowlist (CIDR + ports). Stats/flows API unavailable. |
+| `ebpf` | Load FluxVM’s TC classifier (`bpf/fluxvm_tc.bpf.c`), pin programs/maps under `pin_root`, attach to the host-visible VM interface. |
 | `cilium` | Same FluxVM VM-edge eBPF path, but only after verifying the Cilium agent socket and bpffs are visible. **Never** writes Cilium private BPF maps. |
 
 Default remains `sandbox.dataplane.mode = "legacy"`. Existing configs that omit
 `[sandbox.dataplane]` keep using nftables.
 
-Dataplane apply runs on **FluxVm** (`backend: "flux-vm"`) create/start when a
-guest CIDR is known. If `required = false` (default) and eBPF load/attach fails,
-FluxVM logs a warning and falls back to nftables. If `required = true`, create/start
-fails.
+Dataplane apply runs on **FluxVm** (`backend: "flux-vm"`) create/start/restart
+when a guest CIDR is known. If `required = false` (default) and eBPF load/attach
+fails, FluxVM logs a warning and falls back to nftables. If `required = true`,
+create/start fails.
 
 ## What the eBPF path provides
 
 - Actual TC classifier source: [`bpf/fluxvm_tc.bpf.c`](../bpf/fluxvm_tc.bpf.c)
+- Optional XDP guard: [`bpf/fluxvm_xdp.bpf.c`](../bpf/fluxvm_xdp.bpf.c)
 - Per-VM pins under `/sys/fs/bpf/fluxvm/vms/<uuid-simple>/` (`progs/`, `maps/`)
 - Detach metadata (iface name) under `/run/fluxvm/ebpf/vms/<uuid-simple>/` —
   bpffs cannot store regular files
+- XDP ownership markers under `/run/fluxvm/xdp/` (`iface`, `prog_id`) when XDP
+  is enabled (disabled / refused in `cilium` mode)
 - Host ifindex → stable FluxVM VM identity map
-- IPv4 destination-CIDR policy via an LPM trie
-- Per-CPU allow/drop counters and a drop-event ring buffer
+- IPv4 destination-CIDR (LPM) and TCP/UDP destination-port allowlists
+- Per-CPU allow/drop counters, LRU flow table, drop/sampled-allow ring buffer
 - ARP and DHCP always allowed so guests can bootstrap
 - Attach point:
   - namespaced TAP → host-side veth `vh<short-id>`
   - direct TAP/macvtap → that host-visible device
 - Teardown on VM network cleanup (`remove_sandbox_policy` before netns/tap delete)
-- Container image builds/installs the `.o`; DaemonSet mounts host bpffs and
-  read-only `/var/run/cilium`
+- Container image builds/installs both `.o` files; DaemonSet mounts host bpffs
+  and read-only `/var/run/cilium`; unit/container raise memlock
+  (`LimitMEMLOCK=infinity` / `SYS_RESOURCE`)
 
 ## Why Cilium coexistence (not private-map integration)
 
@@ -50,9 +57,6 @@ Ownership boundary:
 4. A later launcher-pod/CNI change can make each VM a native Cilium identity
    (Hubble-aware) without replacing the native FluxVM dataplane API.
 
-For the full Network Fabric v1 surface (L4 ports, per-VM policy API, stats/flows,
-optional XDP guard), see [docs/network-fabric.md](network-fabric.md).
-
 ## Traffic path
 
 Namespaced VM:
@@ -65,7 +69,7 @@ VM -> TAP -> bridge -> namespace veth -> host veth [FluxVM TC/eBPF]
 Non-namespaced TAP/macvtap: the classifier attaches directly to the host-visible
 device.
 
-## Build the BPF object
+## Build the BPF objects
 
 Debian/Ubuntu:
 
@@ -75,14 +79,16 @@ sudo apt-get install clang llvm libbpf-dev linux-tools-common \
 ./scripts/build-ebpf.sh
 sudo install -D -m 0644 dist/bpf/fluxvm_tc.bpf.o \
   /usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o
+sudo install -D -m 0644 dist/bpf/fluxvm_xdp.bpf.o \
+  /usr/lib/fluxvm/bpf/fluxvm_xdp.bpf.o
 ```
 
 (`bpftool` often ships as `linux-tools-*` rather than a package named `bpftool`.)
 
-The Dockerfile builder stage runs `./scripts/build-ebpf.sh` and installs the
-object to `/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o`. Runtime image includes
-`nftables` and `bpftool`. systemd’s `ReadWritePaths` includes `/sys/fs/bpf` so
-pins work under `ProtectSystem=strict`.
+The Dockerfile builder stage runs `./scripts/build-ebpf.sh` and installs both
+objects under `/usr/lib/fluxvm/bpf/`. Runtime image includes `nftables` and
+`bpftool`. systemd’s `ReadWritePaths` includes `/sys/fs/bpf` and `/run/fluxvm`;
+`LimitMEMLOCK=infinity` is required for map load under `ProtectSystem=strict`.
 
 ## Configuration
 
@@ -92,8 +98,18 @@ mode = "ebpf"                 # legacy | ebpf | cilium
 bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
 pin_root = "/sys/fs/bpf/fluxvm"
 required = false              # true => fail VM create/start if eBPF cannot attach
-default_allow = true          # false = deny-by-default for non-matching IPv4 / non-IPv4
+default_allow = true          # false = deny-by-default for non-matching IPv4
 allow_cidrs = ["10.0.0.0/8", "192.0.2.0/24"]
+allow_ports = ["tcp/443", "udp/53"]
+sample_rate = 100             # 0 = off; N ≈ 1/N allowed-flow samples
+
+# Optional node-ingress XDP blocklist (not with mode = "cilium")
+# [sandbox.dataplane.xdp]
+# enabled = true
+# interface = "eno1"
+# bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_xdp.bpf.o"
+# required = false
+# block_cidrs = ["198.51.100.0/24"]
 ```
 
 Also merge allowlists from `sandbox.egress_allow_domains` (resolved to CIDRs) and
@@ -116,7 +132,8 @@ can pin programs and see `cilium.sock` for coexistence checks. See
 
 ## Policy semantics
 
-- IPv4 destination-CIDR egress policy (LPM).
+- IPv4 destination-CIDR egress policy (LPM) and optional L4 destination ports.
+- When both CIDR and port lists are non-empty, **both** must match.
 - ARP and DHCP always allowed.
 - Non-IPv4 follows `default_allow`; with `default_allow = false`, IPv6 is denied
   until IPv6 policy exists.
@@ -125,10 +142,21 @@ Per-VM maps (pinned under each VM’s `maps/` directory):
 
 | Map | Role |
 |-----|------|
-| `fluxvm_id` | ifindex → FluxVM identity + default action |
+| `fluxvm_id` | ifindex → FluxVM identity + default action + flags |
 | `fluxvm_v4` | LPM: identity + destination IPv4 prefix → allow |
+| `fluxvm_l4` | identity + proto/port → allow |
 | `fluxvm_stats` | per-CPU allow/drop counters |
-| `fluxvm_events` | ring buffer for drop events |
+| `fluxvm_flows` | LRU 5-tuple flow table |
+| `fluxvm_events` | ring buffer for drop / sampled-allow events |
+
+REST (see [network-fabric.md](network-fabric.md)):
+
+```http
+GET  /v1/vms/{id}/network/policy
+POST /v1/vms/{id}/network/policy   # admin role when auth is enabled
+GET  /v1/vms/{id}/network/stats
+GET  /v1/vms/{id}/network/flows?limit=100
+```
 
 ## Validation
 
@@ -137,13 +165,22 @@ cargo fmt --all -- --check
 cargo test -p fluxvm-network
 cargo test -p fluxvm-scheduler   # or cargo check -p fluxvm-scheduler on hosts without libhivex
 ./scripts/build-ebpf.sh
+sudo -E ./scripts/test-ebpf-smoke.sh
+```
+
+The smoke script uses dual netns + one persistent `ip netns exec` session so
+bpffs pins remain visible (see [network-fabric.md](network-fabric.md#tests)).
+
+Quick verifier-only load (no policy behavior):
+
+```bash
 sudo bpftool prog load dist/bpf/fluxvm_tc.bpf.o /sys/fs/bpf/fluxvm-smoke type classifier
 sudo rm -f /sys/fs/bpf/fluxvm-smoke
 ```
 
 Privileged integration smoke (FluxVm + `NetworkSpec::Tap { netns: true }`):
 
-1. Set `[sandbox.dataplane] mode = "ebpf"` (and install the `.o`).
+1. Set `[sandbox.dataplane] mode = "ebpf"` (and install the `.o` files).
 2. Create a FluxVm sandbox with netns networking.
 3. Confirm `tc filter show dev vh<short-id> ingress` shows `fluxvm_egress`.
 4. Inspect pins under `/sys/fs/bpf/fluxvm/vms/<uuid-simple>/` and meta under

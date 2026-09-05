@@ -217,7 +217,7 @@ project (path dep from `fluxvm-image`) for offline image customization — see
 - QEMU backend, pause/resume/shutdown via QMP.
 - Cloud Hypervisor backend, pause/resume/shutdown via `ch-remote`.
 - Firecracker backend using JSON `--config-file`, pause/resume via `PATCH /vm`, shutdown via `SendCtrlAltDel`.
-- FluxVM hypervisor backend (`backend: "flux-vm"`) — in-tree control plane that boots real Linux guests via Firecracker as the KVM engine, with UDS pause/resume/shutdown/snapshot, sandbox REST (`/v1/sandboxes`), templates, AutoPause, L7 egress proxy, optional TC/eBPF dataplane, and `/console` UI (see [docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md) and [docs/ebpf-cilium.md](docs/ebpf-cilium.md)).
+- FluxVM hypervisor backend (`backend: "flux-vm"`) — in-tree control plane that boots real Linux guests via Firecracker as the KVM engine, with UDS pause/resume/shutdown/snapshot, sandbox REST (`/v1/sandboxes`), templates, AutoPause, L7 egress proxy, optional TC/eBPF Network Fabric dataplane, and `/console` UI (see [docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md), [docs/network-fabric.md](docs/network-fabric.md), and [docs/ebpf-cilium.md](docs/ebpf-cilium.md)).
 - Vsock guest agent (`fluxvm exec <id> -- <command>`) — run a command inside the guest with no SSH and no network path at all; works over QEMU's native AF_VSOCK device and Cloud Hypervisor/Firecracker/FluxVm UDS vsock proxy.
 - `stop` prefers a graceful VMM shutdown, falling back to force-kill only if the process doesn't exit within a grace period.
 - QEMU qcow2 backing overlays for cheap disposable writes.
@@ -230,7 +230,7 @@ project (path dep from `fluxvm-image`) for offline image customization — see
 - macvtap networking (QEMU and Cloud Hypervisor) — a VM's own MAC directly on a parent link, no bridge.
 - QEMU user-mode networking + host port forwarding.
 - Static-IP network-namespace mode — the guest gets a real, deterministically-reserved DHCP-leased IP, not just host↔namespace NAT.
-- **Sandbox dataplane** — default **legacy nftables** per sandbox; optional **native TC/eBPF** (`ebpf`) and **Cilium coexistence** (`cilium`) modes with LPM IPv4 allowlists, counters, and safe fallback. See [eBPF / Cilium sandbox dataplane](#ebpf--cilium-sandbox-dataplane) and [docs/ebpf-cilium.md](docs/ebpf-cilium.md).
+- **Sandbox dataplane / Network Fabric v1** — default **legacy nftables** per sandbox; optional **native TC/eBPF** (`ebpf`) and **Cilium coexistence** (`cilium`) with L3+L4 allowlists, per-VM policy/stats/flows API, optional XDP guard, and safe nftables fallback. See [eBPF / Cilium sandbox dataplane](#ebpf--cilium-sandbox-dataplane), [docs/network-fabric.md](docs/network-fabric.md), and [docs/ebpf-cilium.md](docs/ebpf-cilium.md).
 - VNC for every QEMU-backed VM, over a unix socket — no port allocation.
 - Interactive console/shell: `GET /v1/vms/{id}/console` (WebSocket) and a guest-agent `OpenShell` vsock op for a real PTY.
 - File transfer over the guest agent: `PutFile`/`GetFile` vsock ops (`POST /v1/vms/{id}/agent/{put,get}-file`).
@@ -266,7 +266,7 @@ ip
 cp
 nft                 # netns NAT + legacy sandbox dataplane
 # Optional native eBPF dataplane (sandbox.dataplane.mode = ebpf|cilium):
-clang llvm libbpf-dev bpftool   # build + load bpf/fluxvm_tc.bpf.c
+clang llvm libbpf-dev bpftool   # build + load bpf/fluxvm_tc.bpf.c (+ optional fluxvm_xdp.bpf.c)
 tc                              # iproute2 TC attach
 ```
 
@@ -430,14 +430,15 @@ sudo ./scripts/test-network-namespace.sh --image /path/to/base.qcow2
 ## eBPF / Cilium sandbox dataplane
 
 FluxVM retains **nftables as the default** sandbox dataplane and adds an optional
-**native TC/eBPF** path for the FluxVm agent-sandbox track. Full detail: [docs/network-fabric.md](docs/network-fabric.md) and
+**native TC/eBPF** path (Network Fabric v1) for the FluxVm agent-sandbox track.
+Full detail: [docs/network-fabric.md](docs/network-fabric.md) and
 [docs/ebpf-cilium.md](docs/ebpf-cilium.md).
 
 ### Modes
 
 | `sandbox.dataplane.mode` | Meaning |
 |--------------------------|---------|
-| `legacy` (default) | Per-sandbox nftables SNAT + optional destination CIDR allowlist |
+| `legacy` (default) | Per-sandbox nftables SNAT + optional destination CIDR/port allowlist |
 | `ebpf` | Load [`bpf/fluxvm_tc.bpf.c`](bpf/fluxvm_tc.bpf.c), pin under `/sys/fs/bpf/fluxvm`, attach TC to the host-visible VM iface |
 | `cilium` | Same FluxVM eBPF attach **after** checking Cilium’s agent socket + bpffs; **never** mutates Cilium private BPF maps |
 
@@ -445,16 +446,16 @@ Backwards compatibility: configs without `[sandbox.dataplane]` keep `legacy` / n
 
 ### What changes with `ebpf` / `cilium`
 
-- Ships a real TC classifier (`bpf/fluxvm_tc.bpf.c`), built by `./scripts/build-ebpf.sh`
+- Ships a real TC classifier (`bpf/fluxvm_tc.bpf.c`) plus optional XDP guard (`bpf/fluxvm_xdp.bpf.c`), built by `./scripts/build-ebpf.sh`
 - Pins per-VM programs/maps under `/sys/fs/bpf/fluxvm/vms/<uuid>/`
-- Stores detach metadata under `/run/fluxvm/ebpf/` (bpffs cannot hold regular files)
-- Maps host ifindex → stable FluxVM VM identity
-- IPv4 destination-CIDR policy via an LPM trie; ARP/DHCP always allowed
-- Allow/drop counters + drop-event ring buffer
+- Stores detach metadata under `/run/fluxvm/ebpf/` (bpffs cannot hold regular files); XDP markers under `/run/fluxvm/xdp/`
+- L3 (CIDR) + L4 (`tcp/443`, `udp/53`) allowlists; ARP/DHCP always allowed
+- Allow/drop counters, LRU flows, drop/sampled-allow ring buffer (`sample_rate`; `0` = off)
+- REST: `GET/POST /v1/vms/{id}/network/policy`, `GET …/stats`, `GET …/flows` (`POST` needs admin when auth is on)
 - Attach: host veth for `netns: true`, else TAP/macvtap device name
 - Tears BPF state down on VM network cleanup
 - Falls back to nftables unless `sandbox.dataplane.required = true`
-- Container image builds/installs the `.o`; DaemonSet mounts bpffs + `/var/run/cilium`
+- Container image installs both `.o` files; DaemonSet mounts bpffs + `/var/run/cilium`; systemd sets `LimitMEMLOCK=infinity`
 
 ### Why Cilium coexistence (not private-map integration)
 
@@ -478,9 +479,12 @@ sudo apt-get install clang llvm libbpf-dev linux-tools-common \
 ./scripts/build-ebpf.sh
 sudo install -D -m 0644 dist/bpf/fluxvm_tc.bpf.o \
   /usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o
+sudo install -D -m 0644 dist/bpf/fluxvm_xdp.bpf.o \
+  /usr/lib/fluxvm/bpf/fluxvm_xdp.bpf.o
 ```
 
-systemd already allows writing pins (`ReadWritePaths=… /sys/fs/bpf`).
+systemd allows writing pins (`ReadWritePaths=… /sys/fs/bpf /run/fluxvm`) and
+raises memlock (`LimitMEMLOCK=infinity`).
 
 ### Config
 
@@ -495,6 +499,14 @@ pin_root = "/sys/fs/bpf/fluxvm"
 required = false              # true => fail FluxVm create/start if attach fails
 default_allow = true
 allow_cidrs = ["10.0.0.0/8"]
+allow_ports = ["tcp/443", "udp/53"]
+sample_rate = 100             # 0 = off
+
+# Optional node-ingress XDP (leave disabled with mode = "cilium")
+# [sandbox.dataplane.xdp]
+# enabled = true
+# interface = "eno1"
+# block_cidrs = ["198.51.100.0/24"]
 ```
 
 On a Cilium node, prefer `mode = "cilium"` and `required = true` once bpffs and
@@ -505,13 +517,13 @@ On a Cilium node, prefer `mode = "cilium"` and `required = true` once bpffs and
 ```bash
 cargo test -p fluxvm-network
 ./scripts/build-ebpf.sh
-sudo bpftool prog load dist/bpf/fluxvm_tc.bpf.o /sys/fs/bpf/fluxvm-smoke type classifier
-sudo rm -f /sys/fs/bpf/fluxvm-smoke
+sudo -E ./scripts/test-ebpf-smoke.sh
 ```
 
-Then boot a FluxVm VM with `network.mode=tap` + `netns=true`, check
-`tc filter show dev vh<short-id> ingress`, inspect pins under
-`/sys/fs/bpf/fluxvm/vms/…`, and confirm delete removes filters and pins.
+The smoke uses dual netns and one persistent `ip netns exec` session (bpffs mounts
+under `/sys` do not survive separate netns execs on many hosts). Then boot a FluxVm
+VM with `network.mode=tap` + `netns=true`, check `tc filter show dev vh<short-id> ingress`,
+inspect pins under `/sys/fs/bpf/fluxvm/vms/…`, and confirm delete removes filters and pins.
 
 ## Create a QEMU disposable VM
 
@@ -577,7 +589,8 @@ egress_proxy_listen = "127.0.0.1:18080"
 http_proxy_default_port = 8080
 
 # Optional VM-edge dataplane (default is legacy nftables). See
-# "eBPF / Cilium sandbox dataplane" above and docs/ebpf-cilium.md.
+# "eBPF / Cilium sandbox dataplane" above, docs/network-fabric.md, and
+# docs/ebpf-cilium.md.
 # [sandbox.dataplane]
 # mode = "ebpf"                 # legacy | ebpf | cilium
 # bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_tc.bpf.o"
@@ -585,6 +598,8 @@ http_proxy_default_port = 8080
 # required = false
 # default_allow = true
 # allow_cidrs = ["10.0.0.0/8"]
+# allow_ports = ["tcp/443", "udp/53"]
+# sample_rate = 100
 ```
 
 Useful routes once `fluxvm serve` is up:
@@ -597,11 +612,13 @@ Useful routes once `fluxvm serve` is up:
 | `POST /v1/sandboxes/{id}/process` | Run a process in the guest |
 | `ANY /v1/sandboxes/{id}/http/{port}/{*path}` | Reverse-proxy into guest (AutoResume) |
 | `ANY /sandbox/{id}/{*path}` | Same proxy, default guest port 8080 |
+| `GET/POST /v1/vms/{id}/network/policy` | Per-VM dataplane policy (Network Fabric) |
+| `GET /v1/vms/{id}/network/stats` · `…/flows` | eBPF counters / flow table |
 | `GET /console` | Lightweight ops UI |
 
 For multi-node shared sandbox index, set `FLUXVM_SANDBOX_STATE_URL` (Redis). Capability matrix:
-[docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md). Dataplane modes:
-[docs/ebpf-cilium.md](docs/ebpf-cilium.md).
+[docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md). Dataplane:
+[docs/network-fabric.md](docs/network-fabric.md), [docs/ebpf-cilium.md](docs/ebpf-cilium.md).
 
 ## Firecracker jailer (chroot, uid/gid isolation, cgroups)
 
@@ -1533,7 +1550,7 @@ assigned the same vsock CID.
 ## Production changes I would make next
 
 1. **Firecracker jailer's own `--cgroup`/`--resource-limit` flags** — superseded: every VM already gets cgroup v2 resource control independent of the jailer (see "Resource control (cgroup v2)" above). Wiring jailer-native limits remains optional hardening only.
-2. **Network namespace policy** — nftables NAT + real IPAM (`state_dir/ipam.json`) are implemented; optional FluxVm TC/eBPF dataplane is implemented (default remains nftables — see [eBPF / Cilium](#ebpf--cilium-sandbox-dataplane)). Follow-ups: DNS-TTL refresh for egress allowlists; Cilium-native VM endpoints.
+2. **Network namespace policy** — nftables NAT + real IPAM (`state_dir/ipam.json`) are implemented; optional FluxVm TC/eBPF Network Fabric (L3+L4, policy/stats/flows, optional XDP) is implemented (default remains nftables — see [eBPF / Cilium](#ebpf--cilium-sandbox-dataplane) and [docs/network-fabric.md](docs/network-fabric.md)). Follow-ups: DNS-TTL refresh for egress allowlists; Cilium-native VM endpoints.
 3. **Snapshots on QEMU/CH** — QEMU `savevm` + `POST /v1/vms/{id}/snapshot` and Cloud Hypervisor `ch-remote snapshot` are implemented (pair with `POST /v1/vms/{id}/start-from-snapshot`). FluxVm memory+disk snapshots remain on the agent-sandbox track.
 4. **Storage abstraction** — already implemented and fully verified (qcow2/raw, LVM thin, NBD, Ceph RBD). NVMe-local as a distinct backend remains unnecessary.
 5. **Image catalog** — Ed25519 signing shipped; optional `catalog.cosign_identities` shells out to `cosign verify-blob`.

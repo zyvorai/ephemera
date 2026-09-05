@@ -1,8 +1,9 @@
 # FluxVM Network Fabric v1
 
-This change turns the existing `fluxvm-network` eBPF hint into a real,
-optional VM-edge dataplane while keeping the existing nftables path as the
-backwards-compatible default.
+This turns the existing `fluxvm-network` eBPF path into a real, optional
+VM-edge dataplane while keeping nftables as the backwards-compatible default.
+
+Also see [ebpf-cilium.md](ebpf-cilium.md) for mode details and Cilium coexistence.
 
 ## What is implemented
 
@@ -34,16 +35,24 @@ physical NIC
 
 A direct host TAP/macvtap uses that host-visible device as the attach point.
 
+Detach metadata (iface name) is stored under
+`/run/fluxvm/ebpf/vms/<uuid-simple>/` — bpffs cannot hold regular files.
+Pins live under `pin_root` (default `/sys/fs/bpf/fluxvm/vms/<uuid-simple>/`).
+
+TC filter uses preference **49152**, handle **1**, program name
+`fluxvm_egress`, and `tc filter add` (not replace) so a collision fails closed.
+
 ### L3 + L4 zero-trust allowlists
 
 The native program supports:
 
 - IPv4 destination CIDR allowlists through an LPM trie.
-- TCP/UDP destination-port allowlists through a hash map.
-- CIDR **and** L4 policy together (both must match).
+- TCP/UDP destination-port allowlists through a hash map (`tcp/443`, `udp/53`).
+- CIDR **and** L4 policy together (both must match when both lists are non-empty).
 - deny-by-default with `default_allow = false`.
 - ARP and DHCP bootstrap traffic.
 - fail-closed handling of fragmented IPv4 packets when L4 policy is enabled.
+- `sample_rate`: `0` = off; `N` ≈ 1/N allowed flows emitted on the ring buffer.
 
 The nftables fallback implements the same CIDR/L4 policy semantics instead of
 silently dropping the L4 portion of policy.
@@ -52,7 +61,8 @@ silently dropping the L4 portion of policy.
 
 A VM can override the node defaults at runtime. Policies are persisted below
 `<state_dir>/network-policy/<uuid>.json`, re-applied after stop/start, and
-removed with the VM.
+removed with the VM. `POST` requires the **admin** role when auth is enabled;
+on apply failure the previous policy is restored.
 
 ```http
 GET  /v1/vms/<uuid>/network/policy
@@ -82,13 +92,16 @@ The TC program maintains:
 - `fluxvm_flows`: LRU IPv4 5-tuple flow records with verdict, packet count,
   byte count, and last-seen monotonic timestamp.
 - `fluxvm_events`: ring buffer for drop events plus sampled allowed events.
+- `fluxvm_l4`: destination-port allowlist.
 
-REST endpoints:
+REST endpoints (native `ebpf` / `cilium` modes only; `legacy` returns an error):
 
 ```http
 GET /v1/vms/<uuid>/network/stats
 GET /v1/vms/<uuid>/network/flows?limit=100
 ```
+
+`limit` defaults to 100 and is capped at 4096.
 
 Example stats response:
 
@@ -113,11 +126,11 @@ mode = "cilium"
 Cilium continues to own Kubernetes/node CNI networking. FluxVM only attaches
 the VM-edge classifier and pins state below `/sys/fs/bpf/fluxvm`. FluxVM does
 **not** modify Cilium's private maps. The loader reuses an existing `clsact`
-qdisc instead of replacing it and uses a reserved high TC priority with `add`
+qdisc instead of replacing it and uses reserved TC priority 49152 with `add`
 semantics, so it refuses a collision instead of overwriting another filter.
 
 The mode verifies `/var/run/cilium/cilium.sock` and bpffs before attaching.
-The Kubernetes DaemonSet patch mounts both into the FluxVM container.
+The Kubernetes DaemonSet mounts both into the FluxVM container.
 
 This is coexistence, not yet a claim that a FluxVM VM is a native Cilium
 endpoint. A later launcher-pod/CNI integration can add first-class Cilium
@@ -126,13 +139,18 @@ identities and Hubble attribution without changing the VM-edge policy API.
 ### Optional standalone XDP guard
 
 `fluxvm_xdp.bpf.o` provides a node-ingress source-CIDR blocklist before the
-normal network stack. It refuses to replace an existing XDP program. FluxVM
-records the pinned program ID and only detaches XDP when the interface still
-reports that exact ID; if another agent replaced it, FluxVM leaves the new
-program untouched.
+normal network stack. It is initialized once at **daemon startup**
+(`VmManager::new`), not per VM.
 
-It is intentionally rejected in `mode = "cilium"` because Cilium may already
-own XDP on physical interfaces for acceleration.
+Ownership / safety:
+
+- Refuses to replace an existing foreign XDP program.
+- Records pinned program ID under `/run/fluxvm/xdp/` (`iface`, `prog_id`).
+- On teardown, detaches only when the interface still reports that exact ID;
+  if another agent replaced it, FluxVM leaves the new program untouched.
+- Intentionally rejected in `mode = "cilium"` (Cilium may already own XDP).
+- `xdp.enabled = false` (default) is a no-op; `xdp.required = true` fails
+  daemon init on attach error.
 
 Example:
 
@@ -157,13 +175,22 @@ required = false               # true => VM creation/start fails if attach fails
 default_allow = false
 allow_cidrs = ["10.0.0.0/8"]
 allow_ports = ["tcp/443", "udp/53"]
-sample_rate = 100
+sample_rate = 100              # 0 = off
 ```
 
 The default remains `mode = "legacy"`, so existing installations do not start
 loading eBPF merely by upgrading FluxVM. Native mode requires a Linux kernel
 with ring-buffer BPF maps (5.8+); when `required = false`, an unavailable BPF
 feature falls back to nftables rather than blocking VM startup.
+
+### Memlock / systemd
+
+Loading BPF maps needs raised `RLIMIT_MEMLOCK`. The packaged unit sets
+`LimitMEMLOCK=infinity` and `ReadWritePaths` includes `/sys/fs/bpf` and
+`/run/fluxvm`. Non-systemd or container runs need the same (or equivalent
+capabilities). The DaemonSet grants `SYS_RESOURCE` for this reason.
+
+Tests may override meta roots with `FLUXVM_BPF_META_ROOT`.
 
 ## Build
 
@@ -178,7 +205,7 @@ sudo install -D -m 0644 dist/bpf/fluxvm_xdp.bpf.o \
   /usr/lib/fluxvm/bpf/fluxvm_xdp.bpf.o
 ```
 
-The Dockerfile patch performs those steps automatically.
+The Dockerfile builder stage runs these steps automatically.
 
 ## Tests
 
@@ -196,10 +223,20 @@ BPF compilation and a real kernel attach smoke test:
 ```bash
 ./scripts/build-ebpf.sh
 sudo -E ./scripts/test-ebpf-smoke.sh
+# or with installed objects:
+# sudo -E ./scripts/test-ebpf-smoke.sh /usr/lib/fluxvm/bpf
 ```
 
-The included `Network Fabric` GitHub Actions workflow runs all of the above on
-PRs that touch the networking implementation.
+`scripts/test-ebpf-smoke.sh` creates **two network namespaces** and a veth pair
+so traffic truly crosses the wire (same-netns `ping -I` is unreliable when the
+destination is also a local address). All `bpftool` / `tc` / bpffs work runs in
+**one persistent `ip netns exec` session** — on many hosts, separate
+`ip netns exec` invocations remount `/sys` and drop custom bpffs mounts under
+`/sys/fs/bpf`. The smoke covers TC allow/deny/LPM, stats/flows map dumps, and
+XDP blocklist attach/detach.
+
+The `Network Fabric` GitHub Actions workflow runs the above on PRs that touch
+the networking implementation.
 
 ## Deliberately not in v1
 

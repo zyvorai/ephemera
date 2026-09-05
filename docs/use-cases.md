@@ -138,7 +138,8 @@ boot, egress vault, AutoPause), see
 (`backend: "flux-vm"`) is the agent-sandbox track: memory snapshots, `/v1/sandboxes`,
 guest HTTP proxy with AutoResume, L7 egress, `/console`, and an optional native
 TC/eBPF dataplane (nftables default; Cilium coexistence without mutating Cilium
-maps — [docs/ebpf-cilium.md](ebpf-cilium.md)).
+maps — [docs/network-fabric.md](network-fabric.md),
+[docs/ebpf-cilium.md](ebpf-cilium.md)).
 
 ## Disposable dev/test environments
 
