@@ -50,6 +50,7 @@ async fn proxy(State(state): State<Arc<ProxyState>>, req: Request<Body>) -> Resp
 
     let decision: EgressDecision = decide(&state.cfg, &host);
     if !decision.allow {
+        fluxvm_core::metrics::inc_egress_deny();
         warn!(%host, reason = %decision.reason, "egress denied");
         return (StatusCode::FORBIDDEN, decision.reason).into_response();
     }

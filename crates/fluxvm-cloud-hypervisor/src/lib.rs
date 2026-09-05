@@ -16,6 +16,18 @@ const CH_REMOTE_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct CloudHypervisorBackend;
 
 pub fn build_args(cfg: &Config, req: &CreateVmRequest, ctx: &LaunchContext) -> Result<Vec<String>> {
+    // Restore from a prior Cloud Hypervisor snapshot — config comes from the
+    // snapshot bundle, not the create request.
+    if let Some(tag) = &req.loadvm_tag {
+        let snap_dir = ctx.workspace.join("snapshots").join(tag);
+        return Ok(vec![
+            "--api-socket".into(),
+            ctx.workspace.join("ch-api.sock").display().to_string(),
+            "--restore".into(),
+            format!("source_url=file://{}", path_arg(&snap_dir)),
+        ]);
+    }
+
     let api = ctx.workspace.join("ch-api.sock");
     let mut a = vec![
         "--api-socket".into(),
@@ -152,6 +164,28 @@ impl VmBackend for CloudHypervisorBackend {
     async fn graceful_shutdown(&self, cfg: &Config, vm: &VmRecord) -> Result<()> {
         ch_remote(cfg, vm, "shutdown").await
     }
+}
+
+/// Pause, snapshot to `dest`, resume. `dest` is a directory URL path
+/// (`file:///…`) without the scheme — written under the VM workspace.
+pub async fn snapshot_save(cfg: &Config, vm: &VmRecord, dest: &std::path::Path) -> Result<()> {
+    ch_remote(cfg, vm, "pause").await?;
+    let url = format!("file://{}", path_arg(dest));
+    let api = vm.workspace.join("ch-api.sock");
+    let result = run_checked_timeout(
+        &cfg.ch_remote_binary,
+        &[
+            "--api-socket".into(),
+            api.display().to_string(),
+            "snapshot".into(),
+            url,
+        ],
+        CH_REMOTE_TIMEOUT,
+    )
+    .await;
+    let _ = ch_remote(cfg, vm, "resume").await;
+    result?;
+    Ok(())
 }
 
 async fn ch_remote(cfg: &Config, vm: &VmRecord, subcommand: &str) -> Result<()> {

@@ -4,6 +4,7 @@
 pub mod dataplane;
 pub mod egress;
 pub mod egress_proxy;
+pub mod ipam;
 pub mod netns;
 
 use anyhow::{Context, Result, bail};
@@ -31,7 +32,7 @@ pub async fn prepare(cfg: &Config, id: Uuid, spec: &NetworkSpec) -> Result<Prepa
             mac,
             netns: use_netns,
         } if *use_netns => {
-            let handle = netns::prepare(id, mac.as_deref())
+            let handle = netns::prepare(&cfg.state_dir, id, mac.as_deref())
                 .await
                 .context("preparing network namespace")?;
             Ok(PreparedNetwork {
@@ -220,6 +221,7 @@ async fn open_macvtap_fd(name: &str) -> Result<i32> {
 /// based on which kind it is (TAP vs. macvtap use different deletion
 /// commands).
 pub async fn cleanup(
+    state_dir: &std::path::Path,
     id: Uuid,
     spec: &NetworkSpec,
     tap_name: &str,
@@ -230,7 +232,7 @@ pub async fn cleanup(
     // cleanup_tap/cleanup_macvtap for a namespaced tap would fail anyway
     // (it doesn't exist in the host's own namespace to delete).
     if let Some(ns) = netns_name {
-        return netns::cleanup(id, ns).await;
+        return netns::cleanup(state_dir, id, ns).await;
     }
     match spec {
         NetworkSpec::Macvtap { .. } => cleanup_macvtap(tap_name).await,

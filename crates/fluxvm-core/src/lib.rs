@@ -3,5 +3,6 @@
 
 pub mod backend;
 pub mod config;
+pub mod metrics;
 pub mod model;
 pub mod process;

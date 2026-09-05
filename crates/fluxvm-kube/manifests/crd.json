@@ -53,6 +53,10 @@
                     "description": "One of \"qemu\", \"cloud-hypervisor\", \"firecracker\", \"auto\" — passed straight through to the local fluxvm's `CreateVmRequest.backend`.",
                     "type": "string"
                   },
+                  "bridge": {
+                    "nullable": true,
+                    "type": "string"
+                  },
                   "diskSizeGib": {
                     "format": "uint64",
                     "minimum": 0.0,
@@ -63,24 +67,46 @@
                     "description": "Passed straight through as `CreateVmRequest.image`. No catalog aliasing awareness beyond whatever the local fluxvm is itself configured with (see README's \"Image catalog & signing\").",
                     "type": "string"
                   },
+                  "mac": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "macvtapMode": {
+                    "nullable": true,
+                    "type": "string"
+                  },
                   "memoryMib": {
                     "default": 2048,
                     "format": "uint64",
                     "minimum": 0.0,
                     "type": "integer"
                   },
+                  "netns": {
+                    "default": false,
+                    "type": "boolean"
+                  },
                   "networkMode": {
                     "default": "none",
-                    "description": "\"none\" (default) or \"user\" — the two networking modes that need no host-specific device/bridge name in the CR itself. `tap`/`macvtap` need a `tap_name`/`bridge`/`parent` this CRD doesn't expose yet.",
+                    "description": "\"none\", \"user\", \"tap\", or \"macvtap\". Tap needs optional `bridge`/ `tapName`/`mac`/`netns`; macvtap needs `parent` (+ optional `macvtapMode`/`mac`).",
                     "type": "string"
                   },
                   "node": {
-                    "description": "Node this VM must run on (matched against `NODE_NAME`/`--node-name` the operator on that node was started with — see `main.rs`). A `DisposableVm` with no `node` set, or one that doesn't match any running operator's node name, is never picked up by any instance; this project has no central scheduler to place it for you (see README's \"Production changes\" — distributed node-agent/central placement is still a deferred item).",
+                    "description": "Node this VM must run on. Optional when a cluster placer (`fluxvm-kube --enable-placement`) is running — it fills this in. A `DisposableVm` with no `node` set is ignored by node-local operators until placement assigns one.",
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "parent": {
+                    "description": "Parent link for `networkMode: macvtap` (required in that mode).",
+                    "nullable": true,
                     "type": "string"
                   },
                   "storage": {
                     "default": "default",
-                    "description": "One of \"default\", \"lvm-thin\", \"nbd\", \"ceph-rbd\" — see README's \"Storage backends\". \"default\" (qcow2/raw) needs no other host setup; the other three assume the local fluxvm's config/host already has the matching infrastructure (a thin pool, `qemu-nbd`, a Ceph cluster) — this CRD doesn't validate that ahead of time, the same way a raw `POST /v1/vms` doesn't either.",
+                    "description": "One of \"default\", \"lvm-thin\", \"nbd\", \"ceph-rbd\" — see README's \"Storage backends\".",
+                    "type": "string"
+                  },
+                  "tapName": {
+                    "nullable": true,
                     "type": "string"
                   },
                   "ttlSeconds": {
@@ -97,8 +123,7 @@
                   }
                 },
                 "required": [
-                  "image",
-                  "node"
+                  "image"
                 ],
                 "type": "object"
               },

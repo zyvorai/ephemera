@@ -213,10 +213,26 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Serve => {
+            if cfg.auth.must_authenticate(&cfg.listen) && cfg.auth.tokens.is_empty() {
+                anyhow::bail!(
+                    "auth is required for listen={} but [[auth.tokens]] is empty — \
+                     add tokens or bind 127.0.0.1 / set auth.require=false for loopback-only lab use",
+                    cfg.listen
+                );
+            }
+            if cfg.auth.tokens.is_empty() {
+                tracing::warn!(
+                    listen = %cfg.listen,
+                    "API auth is OFF (no [[auth.tokens]]); every request is admin"
+                );
+            }
             m.start_reaper();
             m.spawn_autopause_loop();
             if !cfg.sandbox.egress_proxy_listen.is_empty() {
                 let addr: std::net::SocketAddr = cfg.sandbox.egress_proxy_listen.parse()?;
+                if let Err(e) = fluxvm_network::egress::apply_egress_redirect(addr.port()) {
+                    tracing::warn!(error = %e, "egress redirect nftables apply failed");
+                }
                 let sandbox_cfg = cfg.sandbox.clone();
                 tokio::spawn(async move {
                     if let Err(e) = fluxvm_network::egress_proxy::serve(addr, sandbox_cfg).await {

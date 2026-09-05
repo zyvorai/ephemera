@@ -23,6 +23,12 @@ pub struct SandboxCreateRequest {
     pub spec: Option<CreateVmRequest>,
     #[serde(default)]
     pub ttl_seconds: Option<u64>,
+    /// Default guest port for `/sandbox/{id}/…` HTTP proxy (overrides config).
+    #[serde(default)]
+    pub http_proxy_port: Option<u16>,
+    /// Extra guest ports exposed via `/v1/sandboxes/{id}/http/{port}/…`.
+    #[serde(default)]
+    pub http_proxy_ports: Vec<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,7 +71,31 @@ impl VmManager {
         } else if let Some(a) = create.agent.as_mut() {
             a.enabled = true;
         }
-        self.create(create).await
+        let record = self.create(create).await?;
+        let proxy_ports: Vec<u16> = {
+            let mut ports = Vec::new();
+            if let Some(p) = req.http_proxy_port {
+                ports.push(p);
+            } else {
+                ports.push(self.cfg.sandbox.http_proxy_default_port);
+            }
+            for p in req.http_proxy_ports {
+                if !ports.contains(&p) {
+                    ports.push(p);
+                }
+            }
+            ports
+        };
+        let meta = serde_json::json!({
+            "http_proxy_default_port": proxy_ports.first().copied().unwrap_or(8080),
+            "http_proxy_ports": proxy_ports,
+        });
+        tokio::fs::write(
+            record.workspace.join("sandbox-proxy.json"),
+            serde_json::to_vec_pretty(&meta)?,
+        )
+        .await?;
+        Ok(record)
     }
 
     async fn load_template_spec(&self, name: &str) -> Result<CreateVmRequest> {
@@ -154,6 +184,10 @@ impl VmManager {
             qga: None,
             storage: Default::default(),
             shared_folders: Vec::new(),
+            numa_node: None,
+            cpuset: None,
+            hugepages: None,
+            vfio_devices: vec![],
         };
         tokio::fs::write(tdir.join("spec.json"), serde_json::to_vec_pretty(&spec)?).await?;
         Ok(TemplateInfo {
@@ -205,6 +239,22 @@ impl VmManager {
             }
         }
         Ok(n)
+    }
+
+    /// Default HTTP proxy port for a sandbox (`/sandbox/{id}/…`).
+    pub async fn sandbox_http_proxy_port(&self, vm: &VmRecord) -> u16 {
+        let path = vm.workspace.join("sandbox-proxy.json");
+        if let Ok(raw) = tokio::fs::read_to_string(&path).await {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(p) = v
+                    .get("http_proxy_default_port")
+                    .and_then(|p| p.as_u64())
+                {
+                    return p as u16;
+                }
+            }
+        }
+        self.cfg.sandbox.http_proxy_default_port
     }
 
     pub fn spawn_autopause_loop(self: &std::sync::Arc<Self>) {

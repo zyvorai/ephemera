@@ -269,6 +269,21 @@ pub struct CreateVmRequest {
     pub storage: StorageBackend,
     #[serde(default)]
     pub shared_folders: Vec<SharedFolder>,
+    /// QEMU only: bind vCPU threads to host NUMA node(s).
+    #[serde(default)]
+    pub numa_node: Option<u8>,
+    /// QEMU only: cpuset expression passed to `-numa cpu=…` / taskset-style
+    /// pinning via `-object memory-backend-…` + `-numa` when combined with
+    /// `hugepages`.
+    #[serde(default)]
+    pub cpuset: Option<String>,
+    /// QEMU only: back guest RAM with host huge pages (`-mem-prealloc
+    /// -mem-path /dev/hugepages/...` when set true).
+    #[serde(default)]
+    pub hugepages: Option<bool>,
+    /// QEMU only: VFIO PCI passthrough device addresses (`host=0000:…`).
+    #[serde(default)]
+    pub vfio_devices: Vec<String>,
 }
 fn default_vcpus() -> u8 {
     2

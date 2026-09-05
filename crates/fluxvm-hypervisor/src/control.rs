@@ -26,6 +26,11 @@ pub async fn serve(
     }
     let listener = UnixListener::bind(&api_sock)
         .with_context(|| format!("binding API socket {}", api_sock.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&api_sock, std::fs::Permissions::from_mode(0o600));
+    }
     info!(path = %api_sock.display(), "fluxvm-hypervisor API listening");
 
     let state = Arc::new(Mutex::new(VmState::new()));
@@ -98,7 +103,7 @@ async fn dispatch(state: Arc<Mutex<VmState>>, req: ApiRequest, workspace: &Path)
         ApiRequest::Pause => {
             let mut st = state.lock().await;
             if let Some(g) = &st.guest {
-                if let Err(e) = guest::pause(&g.api_sock).await {
+                if let Err(e) = g.pause().await {
                     return ApiResponse::Error {
                         message: format!("{e:#}"),
                     };
@@ -114,7 +119,7 @@ async fn dispatch(state: Arc<Mutex<VmState>>, req: ApiRequest, workspace: &Path)
         ApiRequest::Resume => {
             let mut st = state.lock().await;
             if let Some(g) = &st.guest {
-                if let Err(e) = guest::resume(&g.api_sock).await {
+                if let Err(e) = g.resume().await {
                     return ApiResponse::Error {
                         message: format!("{e:#}"),
                     };
@@ -137,12 +142,12 @@ async fn dispatch(state: Arc<Mutex<VmState>>, req: ApiRequest, workspace: &Path)
         ApiRequest::SnapshotSave { path } => {
             let st = state.lock().await;
             if let Some(g) = &st.guest {
-                let _ = guest::pause(&g.api_sock).await;
+                let _ = g.pause().await;
             }
             let result = snapshot::save(&st, &path).await;
             if st.lifecycle == VmLifecycle::Running {
                 if let Some(g) = &st.guest {
-                    let _ = guest::resume(&g.api_sock).await;
+                    let _ = g.resume().await;
                 }
             }
             match result {
@@ -220,8 +225,11 @@ async fn boot_inner(st: &mut VmState, cfg: BootConfig, workspace: &Path) -> Resu
         seccomp::apply_minimal().context("applying seccomp")?;
     }
 
-    // Prefer a real KVM guest via Firecracker (proven create/exec path).
-    let handle = guest::start(&cfg, workspace).await?;
+    // Firecracker (default) or pure in-tree KVM when `cfg.engine` requests it.
+    let handle = match cfg.engine {
+        crate::api::FluxVmEngine::Firecracker => guest::start(&cfg, workspace).await?,
+        crate::api::FluxVmEngine::Kvm => guest::start_kvm(&cfg, workspace).await?,
+    };
     st.guest = Some(handle);
     st.boot = Some(cfg);
     st.lifecycle = VmLifecycle::Running;

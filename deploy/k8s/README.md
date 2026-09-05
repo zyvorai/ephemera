@@ -91,17 +91,12 @@ cargo run -p fluxvm-kube -- --print-crd > deploy/k8s/crd.yaml
 
 Regenerate it whenever `crates/fluxvm-kube/src/crd.rs` changes.
 
-## Known limitations (deliberately out of scope here)
+## Known limitations
 
-- **Networking**: `spec.networkMode` only supports `none`/`user` today —
-  no `tap`/`macvtap`, even though the underlying `fluxvm-core` model
-  already implements both. VMs get NAT + port-forward connectivity only.
-  Extending this touches `crates/fluxvm-kube/src/{crd.rs,fluxvm_client.rs}`
-  and interacts with this DaemonSet's `hostNetwork: true` and your cluster's
-  CNI — a separate design pass, not a config change.
-- **No scheduler**: `spec.node` must be an exact, valid node name — nothing
-  in `fluxvm-kube` picks one for you. Whatever creates `DisposableVm`
-  objects (e.g. Ragnarok's backend) is responsible for choosing a node
-  among the `ragnarok.io/fluxvm-capable=true` set.
 - **No image distribution**: images must already exist at the given path
   on the target node.
+- **Placer is optional**: leave `spec.node` empty only when a
+  `fluxvm-kube --enable-placement` instance is running; otherwise pin
+  `spec.node` yourself (e.g. from Ragnarok's capable-nodes picker).
+- Tap/macvtap with `hostNetwork: true` interact with your CNI — stage
+  bridges/parents on the host the same way a bare-metal FluxVM deploy does.

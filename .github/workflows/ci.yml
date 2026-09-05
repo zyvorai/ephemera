@@ -126,3 +126,33 @@ jobs:
           TEST_PACKAGE: tree
           TEST_SERVICE: ${{ matrix.test_service }}
         run: sudo -E ./scripts/test-image-customize.sh --image /tmp/base-image.qcow2
+
+  container-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout fluxvm
+        uses: actions/checkout@v4
+        with:
+          path: fluxvm
+
+      - name: Checkout guestkit (BuildKit context)
+        uses: actions/checkout@v4
+        with:
+          repository: zyvorai/guestkit
+          path: guestkit
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push on PR)
+        uses: docker/build-push-action@v6
+        with:
+          context: fluxvm
+          build-contexts: guestkit=guestkit
+          push: false
+          tags: ghcr.io/zyvorai/fluxvm:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

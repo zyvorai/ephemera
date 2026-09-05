@@ -15,6 +15,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 const QMP_TIMEOUT: Duration = Duration::from_secs(10);
+/// `savevm` writes guest RAM+device state into the qcow2 — can take well over
+/// 10s on multi-GB cloud images, so use a longer budget than other QMP ops.
+const QMP_SAVEVM_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long to wait for each `virtiofsd` to create its listening socket
 /// before giving up and launching QEMU anyway (which would then fail to
 /// connect with a clear error, rather than this hanging indefinitely).
@@ -62,8 +65,10 @@ pub fn build_args(
     // that varies by backend (see `fluxvm_image::storage::disk_format`).
     let disk_drive = match &ctx.nbd_export {
         Some(socket) => format!("file=nbd:unix:{},if=virtio,format=raw", socket.display()),
+        // writeback (not cache=none) so QMP `savevm` / internal snapshots work on
+        // CoW overlays — O_DIRECT hangs human-monitor-command savevm indefinitely.
         None => format!(
-            "file={},if=virtio,format={},cache=none,aio=native",
+            "file={},if=virtio,format={},cache=writeback",
             path_arg(&ctx.disk),
             ctx.disk_format
         ),
@@ -164,6 +169,28 @@ pub fn build_args(
             ),
         ]);
         a.extend(["-numa".into(), "node,memdev=mem".into()]);
+    } else if req.hugepages == Some(true) {
+        a.extend([
+            "-object".into(),
+            format!(
+                "memory-backend-file,id=hp_mem,size={}M,mem-path=/dev/hugepages,share=on,prealloc=on",
+                req.memory_mib
+            ),
+        ]);
+        a.extend(["-numa".into(), "node,memdev=hp_mem".into()]);
+    } else if req.numa_node.is_some() || req.cpuset.is_some() {
+        a.extend(["-numa".into(), "node,nodeid=0".into()]);
+    }
+    if let Some(cpus) = &req.cpuset {
+        a.extend(["-numa".into(), format!("cpu={cpus},node=0")]);
+    } else if req.numa_node.is_some() {
+        a.extend([
+            "-numa".into(),
+            format!("cpu=0-{},node=0", req.vcpus.saturating_sub(1)),
+        ]);
+    }
+    for host in &req.vfio_devices {
+        a.extend(["-device".into(), format!("vfio-pci,host={host}")]);
     }
     for (i, (tag, socket)) in virtiofs_sockets.iter().enumerate() {
         a.extend([
@@ -409,6 +436,22 @@ impl VmBackend for QemuBackend {
     }
 }
 
+/// Pause, save an internal snapshot tagged `name`, then resume if the VM was
+/// running. Pairs with `-loadvm` / [`VmManager::start_from_snapshot`].
+pub async fn snapshot_save(_cfg: &Config, vm: &VmRecord, name: &str) -> Result<()> {
+    let sock = vm.workspace.join("qmp.sock");
+    let was_running = vm.status == fluxvm_core::model::VmStatus::Running;
+    if was_running {
+        qmp::execute(&sock, "stop", None, QMP_TIMEOUT).await?;
+    }
+    let result = qmp::savevm(&sock, name, QMP_SAVEVM_TIMEOUT).await;
+    if was_running {
+        let _ = qmp::execute(&sock, "cont", None, QMP_TIMEOUT).await;
+    }
+    result?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -438,6 +481,10 @@ mod tests {
             qga: None,
             storage: fluxvm_core::model::StorageBackend::Default,
             shared_folders: vec![],
+            numa_node: None,
+            cpuset: None,
+            hugepages: None,
+            vfio_devices: vec![],
         }
     }
 

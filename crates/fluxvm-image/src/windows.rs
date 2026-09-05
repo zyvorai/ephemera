@@ -44,6 +44,14 @@ pub struct WindowsCustomize {
     pub password: Option<String>,
     #[serde(default)]
     pub agent: Option<WindowsAgentSpec>,
+    /// Host path to an `unattend.xml` copied into the guest as
+    /// `C:\Windows\Panther\unattend.xml` before first boot.
+    #[serde(default)]
+    pub unattend_path: Option<PathBuf>,
+    /// When true, stage `sysprep /generalize /oobe /shutdown` via RunOnce
+    /// for a sealed, first-boot-ready image.
+    #[serde(default)]
+    pub sysprep: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,7 +157,62 @@ pub fn customize_windows_blocking(image: &Path, win: &WindowsCustomize) -> Resul
         .context("injecting Zyvor/GuestKit Windows agent")?;
     }
 
+    if let Some(unattend) = &win.unattend_path {
+        inject_unattend(image, unattend)?;
+    }
+    if win.sysprep {
+        apply_plan(
+            image,
+            &sysprep_runonce_plan(image.display().to_string())?,
+        )?;
+    }
+
     Ok(())
+}
+
+fn inject_unattend(image: &Path, host_path: &Path) -> Result<()> {
+    if !host_path.exists() {
+        bail!("unattend_path does not exist: {}", host_path.display());
+    }
+    let content = std::fs::read_to_string(host_path)
+        .with_context(|| format!("reading {}", host_path.display()))?;
+    let mut plan = FixPlan::new(image.display().to_string(), "fluxvm-unattend".into());
+    plan.version = "1".into();
+    plan.overall_risk = "low".into();
+    plan.estimated_duration = "seconds".into();
+    plan.metadata.author = "fluxvm".into();
+    plan.add_operation(Operation {
+        id: "unattend-write".into(),
+        op_type: OperationType::FileWrite(FileWrite {
+            path: "/Windows/Panther/unattend.xml".into(),
+            content,
+            mode: None,
+        }),
+        priority: Priority::Medium,
+        description: "Inject Windows unattend.xml".into(),
+        risk: Priority::Low,
+        reversible: true,
+        depends_on: vec![],
+        validation: None,
+        undo: None,
+    });
+    apply_plan(image, &plan)
+}
+
+fn sysprep_runonce_plan(image: String) -> Result<FixPlan> {
+    let mut plan = FixPlan::new(image, "fluxvm-sysprep".into());
+    plan.version = "1".into();
+    plan.overall_risk = "medium".into();
+    plan.estimated_duration = "minutes".into();
+    plan.metadata.author = "fluxvm".into();
+    plan.metadata.description = Some(
+        "Stage sysprep /generalize /oobe /shutdown on first boot via RunOnce".into(),
+    );
+    plan.add_operation(runonce_op(
+        "FluxVMSysprep",
+        r#"C:\Windows\System32\Sysprep\sysprep.exe /generalize /oobe /shutdown /quiet"#,
+    ));
+    Ok(plan)
 }
 
 fn apply_plan(image: &Path, plan: &FixPlan) -> Result<()> {

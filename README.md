@@ -979,6 +979,7 @@ GET    /v1/vms
 GET    /v1/vms/{uuid}
 POST   /v1/vms/{uuid}/start
 POST   /v1/vms/{uuid}/start-from-snapshot
+POST   /v1/vms/{uuid}/snapshot
 POST   /v1/vms/{uuid}/stop
 POST   /v1/vms/{uuid}/pause
 POST   /v1/vms/{uuid}/resume
@@ -1218,11 +1219,16 @@ generic `400 Bad Request` — there's no distinct `404` anywhere in this API. Th
 actually fired; a VM that vanished was reported as a transient error and endlessly retried instead of
 triggering recreation. Fixed by checking the response body's error message instead of the status code.
 
-**Not yet done**: packaging the operator as an actual container image + daemonset manifest (it was
-run as a plain host process against a real cluster for this round's verification, not deployed
-in-cluster); a `tap`/`macvtap` networking mode in the CRD (needs a device/bridge name field); and any
-cross-node placement — the "which node should this VM land on" decision is the caller's today, made
-by setting `spec.node` directly, not something this project chooses for you.
+**Packaging**: `Dockerfile` + [`deploy/k8s/`](deploy/k8s/) ship a DaemonSet (fluxvm serve +
+fluxvm-kube per capable node). Apply with the order in `deploy/k8s/README.md`. CI builds the
+image; publish to `ghcr.io/zyvorai/fluxvm` from release workflows.
+
+**Networking**: `spec.networkMode` supports `none`, `user`, `tap`, and `macvtap` (tap/macvtap
+need `bridge` / `parent` etc. on the CR — see the CRD OpenAPI).
+
+**Placement**: set `spec.node` explicitly, or leave it empty and run one
+`fluxvm-kube --enable-placement` instance to pin to the capable node with the fewest
+`DisposableVm` objects. Node-local operators still only reconcile CRs targeting their node.
 
 ## Using FluxVM through zyvor-fabric
 
@@ -1374,11 +1380,12 @@ before it ever reached the real target process, leaving the actual `fluxvm serve
 time with no error surfaced. Fixed with the standard `[t]arget/...` bracket-escape idiom that keeps
 `pgrep`/`pkill -f` from matching their own invocation.
 
-**Not yet done**: TLS/auth between node agents and central (both sides currently trust any caller who
-can reach the port — fine for a private management network, not for anything exposed further);
-persisting fleet registry state (an `fluxvm-agent central` restart forgets every node until their
-next heartbeat, ~`--interval-secs` seconds later); and richer placement policies beyond
-fewest-VMs-wins (no CPU/memory-aware bin-packing, no per-VM node affinity/anti-affinity).
+**Auth / TLS / persistence / placement**: set `--token` / `FLUXVM_AGENT_TOKEN` on both
+`central` and `node` (Bearer on all `/fleet/*` except `/healthz`). Optional
+`--tls-cert`/`--tls-key` on central. Registry persists to
+`--state-dir/fleet-nodes.json` (survives central restart until heartbeats refresh
+`last_seen`). Unaddressed creates use residual CPU/memory capacity scoring (not
+only fewest-VMs).
 
 ## State layout
 
@@ -1416,19 +1423,19 @@ assigned the same vsock CID.
 
 ## Production changes I would make next
 
-1. **Firecracker jailer's own `--cgroup`/`--resource-limit` flags** — not wired up, but superseded in practice: every VM (all three backends, not just jailed Firecracker) already gets real cgroup v2 resource control (CPU/memory/IO/pids/cpuset, freeze/thaw, stats, PSI pressure) independent of the jailer — see "Resource control (cgroup v2)" above.
-2. **Network namespace policy** — one namespace per VM (veth + NAT + internal bridge) is already implemented and opt-in per VM (see "Network namespaces" above); still missing: nftables instead of one flat iptables MASQUERADE rule per VM, and real IPAM (subnets are derived deterministically from the VM id rather than tracked/reused, a documented theoretical-collision tradeoff).
-3. **Snapshots on QEMU/CH** — FluxVm already has memory+disk snapshot/restore (see [Create a FluxVm agent sandbox](#create-a-fluxvm-agent-sandbox)); still missing equivalent full-state snapshots for the QEMU and Cloud Hypervisor backends.
-4. **Storage abstraction** — already implemented and fully verified: qcow2 CoW overlay and raw reflink (the always-on defaults, per VMM backend), plus opt-in LVM thin snapshots, NBD-exported disks, and Ceph RBD — all verified booting real guests on real hardware, Ceph RBD against a real Rook Ceph cluster; see "Storage backends" below. Not done: NVMe-local as a distinct backend (a local raw file/block device already gets NVMe's real performance with no extra abstraction needed — reflink/LVM already cover that case).
-5. **Image catalog** — already implemented: named/checksummed/Ed25519-signed entries, distro/version/arch metadata (see "Image catalog & signing" above). Not done: a cosign/Sigstore option specifically, for shops standardized on that instead of this project's own signing scheme.
-6. **Policy** — allowed networking modes are still unrestricted (max vCPU/RAM/disk/TTL and allowed backends/image directories are already implemented; see "Policy (admission limits)" above).
-7. **Auth** — mTLS/OIDC, tenant IDs and audit events. Bearer-token REST auth/RBAC (admin/read-only) and a per-VM authenticated guest-agent protocol are already implemented; see "Auth / RBAC" and "Pause, resume, and exec" above.
-8. **Observability** — tracing, per-VM boot timing and failure reasons (a basic Prometheus `/metrics` endpoint — VM counts by status/backend, agent-enabled count — is already implemented; see the REST API section).
-9. **Kubernetes CRD/operator** — already implemented and verified against a real k3s cluster: `DisposableVm` CRD + node-local operator (`fluxvm-kube`); see "Kubernetes CRD/operator" above. Not done: packaging it as a real container image/daemonset manifest, a tap/macvtap networking mode in the CRD, and cross-node placement.
-10. **Distributed node-agent** — already implemented and verified across two real, physically separate hosts: `fluxvm-agent` (the per-*host* one, not `fluxvm-guest-agent`) central registry + node heartbeat client; see "Distributed node-agent" above. Not done: TLS/auth between nodes and central, persisted fleet state, and placement policies beyond fewest-VMs-wins.
-11. **Scheduler placement** — NUMA awareness, CPU pinning, hugepages and GPU/VFIO assignment.
-12. **Windows path** — Offline `windows{}` build-image customize (RDP/WinRM/firewall/scripts/Zyvor GuestKit agent) and live QGA APIs on QEMU are implemented; still missing: full sysprep/unattend productization and Cloud Hypervisor Windows + QGA.
-13. **AI-agent sandbox hardening** (see [docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md)) — pure in-tree KVM guests (no Firecracker child), fuller eBPF dataplane, published density/cold-start benchmarks; core sandbox REST/proxy/egress/AutoPause/Redis index already ship on the FluxVm track.
+1. **Firecracker jailer's own `--cgroup`/`--resource-limit` flags** — superseded: every VM already gets cgroup v2 resource control independent of the jailer (see "Resource control (cgroup v2)" above). Wiring jailer-native limits remains optional hardening only.
+2. **Network namespace policy** — nftables NAT + real IPAM (`state_dir/ipam.json`) are implemented; optional follow-ups: migrate leftover pre-upgrade iptables rules, DNS-TTL refresh for egress allowlists.
+3. **Snapshots on QEMU/CH** — QEMU `savevm` + `POST /v1/vms/{id}/snapshot` and Cloud Hypervisor `ch-remote snapshot` are implemented (pair with `POST /v1/vms/{id}/start-from-snapshot`). FluxVm memory+disk snapshots remain on the agent-sandbox track.
+4. **Storage abstraction** — already implemented and fully verified (qcow2/raw, LVM thin, NBD, Ceph RBD). NVMe-local as a distinct backend remains unnecessary.
+5. **Image catalog** — Ed25519 signing shipped; optional `catalog.cosign_identities` shells out to `cosign verify-blob`.
+6. **Policy** — `allowed_network_modes` and `allow_extra_args` (default false) are enforced alongside existing vCPU/RAM/disk/TTL/backend/image-dir limits.
+7. **Auth** — fail-closed off-loopback, JSON audit (`fluxvm_audit`), per-token quotas. Still open: mTLS/OIDC and first-class tenant IDs.
+8. **Observability** — Prometheus `/metrics` now includes auth/egress deny counters and create/start latency; OpenTelemetry remains optional.
+9. **Kubernetes CRD/operator** — DaemonSet packaging, tap/macvtap CR fields, and optional `--enable-placement` are implemented; see "Kubernetes CRD/operator" and `deploy/k8s/`.
+10. **Distributed node-agent** — TLS/auth, persisted registry, and residual-capacity placement are implemented; see "Distributed node-agent".
+11. **Scheduler placement** — `CreateVmRequest` accepts optional `numa_node`, `cpuset`, `hugepages`, and `vfio_devices` (QEMU backend only). Broader placement policies still open.
+12. **Windows path** — Offline `windows{}` (incl. `unattend_path`/`sysprep`) and live QGA on QEMU are implemented; still missing: Cloud Hypervisor Windows + QGA.
+13. **AI-agent sandbox hardening** (see [docs/agent-sandbox-gaps.md](docs/agent-sandbox-gaps.md)) — `fluxvm_engine=kvm`, multi-port proxy, TC stub, benchmarks; fuller eBPF still optional.
 
 "auto" backend selection is already implemented — see "Auto backend selection" above.
 
@@ -1441,7 +1448,7 @@ assigned the same vsock CID.
 - Firecracker image preparation is stricter than QEMU because it boots a kernel/rootfs directly.
 - Guest disk partition/filesystem expansion after `qemu-img resize` is an image/guest concern. Use cloud-init growpart or your image pipeline.
 - `extra_args` is intentionally an administrator escape hatch. Do not expose it to untrusted tenants.
-- The API is localhost-only by default. Bearer-token auth/RBAC is opt-in (see "Auth / RBAC") — an operator who doesn't configure `[[auth.tokens]]` still gets the old open-by-default behavior.
+- The API is localhost-only by default. Off-loopback binds fail closed without `[[auth.tokens]]`; set `auth.require = true` to always require tokens. Audit lines go to the `fluxvm_audit` tracing target.
 - The vsock guest agent is authenticated by default for any VM created with `agent.enabled: true` (see "Pause, resume, and exec"), but this doesn't extend to mTLS/OIDC-style identity — it's one shared secret per VM, good enough to stop an unrelated host process, not a multi-tenant authorization model.
 - `guestkit`'s `inspect_os()` (used by `copy_in`) only recognizes partitioned disks and LVM volumes as OS roots by default; support for a bare, unpartitioned whole-disk filesystem (the shape Firecracker rootfs images are typically built in) was added as part of this project's testing and needs to make it into a real guestkit release — until then, building against a `guestkit` checkout without that fix will fail `copy_in` on such images with "no operating system found in image".
 

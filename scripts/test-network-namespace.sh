@@ -46,7 +46,7 @@ done
 
 [ "$(uname -s)" = "Linux" ] || { echo "This test boots a real VM and requires a Linux/KVM host." >&2; exit 1; }
 [ -e /dev/kvm ] || { echo "/dev/kvm missing — enable virtualization first." >&2; exit 1; }
-[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — netns/veth/iptables setup needs it." >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo) — netns/veth/nftables setup needs it." >&2; exit 1; }
 [ -n "$IMAGE" ] && [ -f "$IMAGE" ] || { echo "--image is required and must exist" >&2; exit 1; }
 
 EPH="${FLUXVM_BIN:-}"

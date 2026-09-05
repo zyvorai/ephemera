@@ -19,19 +19,11 @@ pub struct NodeConfig {
     pub fluxvm_url: String,
     /// Address a REMOTE central registry should use to reach this same
     /// `fluxvm serve` — this has to be this host's real, externally
-    /// routable address, not `fluxvm_url` unchanged. Found running
-    /// central and two node agents across two separate physical hosts
-    /// before this field existed: both nodes' default `--fluxvm-url`
-    /// (`http://127.0.0.1:...`) got reported to central verbatim, which
-    /// would have made central's create/list/delete proxy calls for
-    /// "node-b" actually hit whatever `fluxvm serve` is listening on
-    /// central's OWN host — silently wrong, not an error, since central
-    /// happens to run its own node agent + local fluxvm too.
-    /// `advertise_url` exists so a node's own view of its fluxvm
-    /// (`fluxvm_url`) and the outside view central needs
-    /// (`advertise_url`) can differ.
+    /// routable address, not `fluxvm_url` unchanged.
     pub advertise_url: String,
     pub interval: Duration,
+    /// Bearer token shared with `fluxvm-agent central --token`.
+    pub token: Option<String>,
 }
 
 /// Runs forever, heartbeating every `cfg.interval`. Logs and keeps going on
@@ -68,12 +60,11 @@ async fn beat(http: &reqwest::Client, cfg: &NodeConfig) -> Result<()> {
         "memory_mib_total": memory_mib_total,
         "vm_count": vm_count,
     });
-    let resp = http
-        .post(format!("{}/fleet/register", cfg.central_url))
-        .json(&body)
-        .send()
-        .await
-        .context("sending heartbeat")?;
+    let mut req = http.post(format!("{}/fleet/register", cfg.central_url));
+    if let Some(t) = &cfg.token {
+        req = req.bearer_auth(t);
+    }
+    let resp = req.json(&body).send().await.context("sending heartbeat")?;
     if !resp.status().is_success() {
         anyhow::bail!("central rejected heartbeat: {}", resp.status());
     }

@@ -39,6 +39,17 @@ pub struct BootConfig {
     pub vsock_uds: Option<PathBuf>,
     #[serde(default)]
     pub seccomp: bool,
+    /// Guest runner: Firecracker (default) or in-tree KVM.
+    #[serde(default)]
+    pub engine: FluxVmEngine,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FluxVmEngine {
+    #[default]
+    Firecracker,
+    Kvm,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

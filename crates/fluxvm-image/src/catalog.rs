@@ -362,7 +362,37 @@ pub async fn resolve(cfg: &Config, image_ref: &Path) -> Result<PathBuf> {
             entry.name
         )
     })?;
+    if !cfg.catalog.cosign_identities.is_empty() {
+        verify_cosign(&local, &cfg.catalog.cosign_identities)
+            .with_context(|| format!("cosign verify for catalog entry '{}'", entry.name))?;
+    }
     Ok(local)
+}
+
+/// Shell out to `cosign verify-blob` when `cosign_identities` is configured.
+fn verify_cosign(path: &Path, identities: &[String]) -> Result<()> {
+    use std::process::Command;
+    for identity in identities {
+        let status = Command::new("cosign")
+            .args([
+                "verify-blob",
+                "--certificate-identity",
+                identity,
+                "--certificate-oidc-issuer",
+                "https://token.actions.githubusercontent.com",
+                &path.display().to_string(),
+            ])
+            .status()
+            .context("spawning cosign (install cosign or clear catalog.cosign_identities)")?;
+        if status.success() {
+            return Ok(());
+        }
+    }
+    bail!(
+        "cosign verify-blob failed for {} against identities {:?}",
+        path.display(),
+        identities
+    );
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -471,6 +501,7 @@ mod tests {
             catalog: CatalogConfig {
                 path: Some(path.to_path_buf()),
                 trusted_signers,
+                cosign_identities: vec![],
             },
             ..Config::default()
         }
@@ -710,6 +741,7 @@ mod tests {
             catalog: CatalogConfig {
                 path: Some(catalog_path),
                 trusted_signers: vec![],
+                cosign_identities: vec![],
             },
             ..Config::default()
         };

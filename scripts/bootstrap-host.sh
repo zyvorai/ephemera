@@ -81,5 +81,16 @@ else
     info "Skipping Firecracker (SKIP_FIRECRACKER=1)"
 fi
 
+if [ -d /etc/apparmor.d ] && command -v apparmor_parser >/dev/null 2>&1; then
+    if [ -f "${SCRIPT_DIR}/../deploy/apparmor/fluxvm" ]; then
+        $SUDO install -m 0644 "${SCRIPT_DIR}/../deploy/apparmor/fluxvm" /etc/apparmor.d/fluxvm
+        $SUDO apparmor_parser -r /etc/apparmor.d/fluxvm 2>/dev/null \
+            && ok "AppArmor profile fluxvm loaded" \
+            || warn "AppArmor profile install failed (non-fatal)"
+    fi
+else
+    info "AppArmor not present — skipping profile install (SELinux hosts: see deploy/apparmor/README)"
+fi
+
 echo ""
 echo "Host ready. Run ./scripts/preflight.sh to confirm everything is on PATH."

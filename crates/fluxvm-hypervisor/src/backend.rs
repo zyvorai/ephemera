@@ -7,7 +7,7 @@ use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use fluxvm_core::{
     backend::{LaunchContext, LaunchResult, VmBackend},
-    config::Config,
+    config::{Config, FluxVmEngine},
     model::{BackendKind, CreateVmRequest, NetworkSpec, VmRecord},
     process::{netns_wrap, spawn_logged_with_env},
 };
@@ -70,6 +70,10 @@ impl VmBackend for FluxVmBackend {
             vsock_cid: ctx.guest_cid,
             vsock_uds: ctx.vsock_socket.clone(),
             seccomp: true,
+            engine: match cfg.fluxvm_engine {
+                FluxVmEngine::Firecracker => crate::api::FluxVmEngine::Firecracker,
+                FluxVmEngine::Kvm => crate::api::FluxVmEngine::Kvm,
+            },
         };
 
         let boot_path = ctx.workspace.join("fluxvm-boot.json");
@@ -90,7 +94,16 @@ impl VmBackend for FluxVmBackend {
             &program,
             &args,
             &ctx.log_path,
-            &[("FLUXVM_FIRECRACKER_BINARY", cfg.firecracker_binary.as_str())],
+            &[
+                ("FLUXVM_FIRECRACKER_BINARY", cfg.firecracker_binary.as_str()),
+                (
+                    "FLUXVM_ENGINE",
+                    match cfg.fluxvm_engine {
+                        FluxVmEngine::Firecracker => "firecracker",
+                        FluxVmEngine::Kvm => "kvm",
+                    },
+                ),
+            ],
         )
         .await?;
         let pid = child

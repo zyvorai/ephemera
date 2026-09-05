@@ -13,6 +13,8 @@ firecracker_binary = "firecracker"
 # In-tree microVMM for the agent-sandbox track (`backend = "flux-vm"`).
 fluxvm_hypervisor_binary = "fluxvm-hypervisor"
 # fluxvm_kernel = "/var/lib/fluxvm/kernels/vmlinux"
+# Guest engine for backend "flux-vm": firecracker (default) or kvm (in-tree, no Firecracker child).
+# fluxvm_engine = "firecracker"
 # cloud_hypervisor_firmware = "/usr/share/cloud-hypervisor/CLOUDHV.fd"
 default_bridge = "vmbr0"
 reaper_interval_secs = 5
@@ -24,6 +26,7 @@ reaper_interval_secs = 5
 # egress_allow_domains = ["api.openai.com", ".github.com"]
 # templates_dir = "/var/lib/fluxvm/templates"
 # egress_proxy_listen = "127.0.0.1:18080"
+# http_proxy_default_port = 8080
 # [[sandbox.credential_vault]]
 # host = "api.openai.com"
 # authorization = "Bearer REPLACE_ME"
@@ -38,12 +41,16 @@ reaper_interval_secs = 5
 # max_ttl_seconds = 86400          # every request must set a ttl_seconds <= this; unbounded VMs are rejected
 # allowed_backends = ["qemu", "firecracker"]
 # allowed_image_dirs = ["/var/lib/fluxvm/images"]
+# allowed_network_modes = ["none", "user", "tap"]
+# allow_extra_args = false
 
-# REST API bearer-token auth/RBAC. Absent or empty -> auth is off and every
-# request is treated as admin (the pre-auth MVP default). GET /healthz never
-# requires a token, even when auth is enabled. Generate tokens with
-# something like `openssl rand -hex 32` — these are bearer secrets, treat
-# them like passwords (chmod this file 0600 once you fill them in).
+# REST API bearer-token auth/RBAC. Absent or empty -> auth is off on
+# loopback only. Non-loopback listen with empty tokens fails at serve-time.
+# Set auth.require = true to always require tokens.
+# [auth]
+# require = false
+# max_vms_per_token = 32
+# max_memory_mib_per_token = 65536
 # [[auth.tokens]]
 # token = "REPLACE_ME_ADMIN_TOKEN"
 # role = "admin"

@@ -66,9 +66,8 @@ impl VmState {
     }
 
     pub async fn shutdown_guest(&mut self) {
-        if let Some(mut g) = self.guest.take() {
-            let _ = crate::guest::shutdown(&g.api_sock).await;
-            let _ = g.child.kill().await;
+        if let Some(g) = self.guest.take() {
+            let _ = g.shutdown().await;
         }
         if let Some(m) = self.marker.take() {
             let _ = std::fs::remove_file(m);
@@ -79,7 +78,7 @@ impl VmState {
 
     pub fn shutdown(&mut self) {
         if let Some(mut g) = self.guest.take() {
-            let _ = g.child.start_kill();
+            g.kill();
         }
         if let Some(m) = self.marker.take() {
             let _ = std::fs::remove_file(m);

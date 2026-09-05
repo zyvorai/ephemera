@@ -12,17 +12,15 @@ use uuid::Uuid;
 /// Install a basic per-sandbox egress table that masquerades traffic from
 /// `guest_cidr` and optionally drops non-allowlisted destinations when
 /// `allow_cidrs` is non-empty.
-pub fn apply_sandbox_policy(id: Uuid, guest_cidr: &str, allow_cidrs: &[String]) -> Result<()> {
-    let table = format!("fluxvm_{}", id.simple());
-    // Best-effort cleanup of a prior table with the same name.
-    let _ = run_nft(&["delete", "table", "inet", &table]);
-
-    run_nft(&["add", "table", "inet", &table])?;
+/// Install POSTROUTING masquerade for traffic sourced from `source_cidr`.
+pub fn apply_subnet_masquerade(table: &str, source_cidr: &str) -> Result<()> {
+    let _ = run_nft(&["delete", "table", "inet", table]);
+    run_nft(&["add", "table", "inet", table])?;
     run_nft(&[
         "add",
         "chain",
         "inet",
-        &table,
+        table,
         "postrouting",
         "{",
         "type",
@@ -37,13 +35,19 @@ pub fn apply_sandbox_policy(id: Uuid, guest_cidr: &str, allow_cidrs: &[String]) 
         "add",
         "rule",
         "inet",
-        &table,
+        table,
         "postrouting",
         "ip",
         "saddr",
-        guest_cidr,
+        source_cidr,
         "masquerade",
     ])?;
+    Ok(())
+}
+
+pub fn apply_sandbox_policy(id: Uuid, guest_cidr: &str, allow_cidrs: &[String]) -> Result<()> {
+    let table = format!("fluxvm_{}", id.simple());
+    apply_subnet_masquerade(&table, guest_cidr)?;
 
     if !allow_cidrs.is_empty() {
         run_nft(&[
@@ -76,17 +80,20 @@ pub fn apply_sandbox_policy(id: Uuid, guest_cidr: &str, allow_cidrs: &[String]) 
 }
 
 pub fn remove_sandbox_policy(id: Uuid) -> Result<()> {
-    let table = format!("fluxvm_{}", id.simple());
-    match run_nft(&["delete", "table", "inet", &table]) {
+    remove_nft_table(&format!("fluxvm_{}", id.simple()))
+}
+
+pub fn remove_nft_table(table: &str) -> Result<()> {
+    match run_nft(&["delete", "table", "inet", table]) {
         Ok(()) => Ok(()),
         Err(e) => {
-            warn!(%id, error = %e, "nftables table delete (may not exist)");
+            warn!(%table, error = %e, "nftables table delete (may not exist)");
             Ok(())
         }
     }
 }
 
-fn run_nft(args: &[&str]) -> Result<()> {
+pub fn run_nft(args: &[&str]) -> Result<()> {
     let out = Command::new("nft")
         .args(args)
         .output()
@@ -101,9 +108,19 @@ fn run_nft(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Optional eBPF attach hint — logs when `bpftool` is present so operators
-/// can layer TC programs; does not fail the dataplane if missing.
+/// Optional eBPF/TC attach — runs `scripts/load-sandbox-tc.sh` when found,
+/// otherwise logs when `bpftool` is available.
 fn try_load_ebpf_hint(id: Uuid) -> Result<()> {
+    if let Some(script) = find_tc_script() {
+        match Command::new("sh").arg(&script).arg(id.to_string()).status() {
+            Ok(s) if s.success() => {
+                info!(%id, script = %script.display(), "loaded sandbox TC stub");
+                return Ok(());
+            }
+            Ok(s) => warn!(%id, code = ?s.code(), "load-sandbox-tc.sh exited non-zero"),
+            Err(e) => warn!(%id, error = %e, "failed to run load-sandbox-tc.sh"),
+        }
+    }
     let status = Command::new("bpftool").args(["version"]).status();
     match status {
         Ok(s) if s.success() => {
@@ -112,4 +129,22 @@ fn try_load_ebpf_hint(id: Uuid) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+fn find_tc_script() -> Option<std::path::PathBuf> {
+    if let Ok(dir) = std::env::var("FLUXVM_SCRIPTS_DIR") {
+        let p = std::path::PathBuf::from(dir).join("load-sandbox-tc.sh");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    for p in [
+        std::path::PathBuf::from("scripts/load-sandbox-tc.sh"),
+        std::path::PathBuf::from("/usr/share/fluxvm/scripts/load-sandbox-tc.sh"),
+    ] {
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
 }

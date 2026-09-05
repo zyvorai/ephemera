@@ -12,24 +12,37 @@ The FluxVM hypervisor track (`backend: "flux-vm"`) is the AI-agent sandbox path.
 |---------|--------|
 | `BackendKind::FluxVm` + `fluxvm-hypervisor` UDS control API | Yes |
 | Real guest boot via Firecracker engine under FluxVM control | Yes |
+| **`fluxvm_engine = "kvm"`** — pure in-tree KVM (no Firecracker child) | Yes (opt-in) |
 | Pause / resume / shutdown (proxied to guest engine) | Yes |
 | **Memory+disk snapshot** (Firecracker `/snapshot/create` + FICLONE) | Yes |
 | **Fast restore** via `/snapshot/load` (cold-boot fallback) | Yes |
 | `/v1/sandboxes` + fs/process APIs | Yes |
 | **Guest HTTP reverse proxy** (`/sandbox/{id}/…`, AutoResume) | Yes |
+| **Multi-port proxy defaults** on sandbox create (`http_proxy_port(s)`) | Yes |
 | AutoPause + activity tracking + wake-on-request | Yes |
 | Egress allowlist + credential vault + live L7 proxy | Yes |
-| **nftables dataplane** per sandbox (+ bpftool hint) | Yes |
+| **nftables dataplane** per sandbox + `scripts/load-sandbox-tc.sh` stub | Yes |
 | OCI → template export | Yes |
 | **Redis shared sandbox index** (`FLUXVM_SANDBOX_STATE_URL`) | Yes |
 | `/console` ops UI | Yes |
+| **Benchmarks** — `scripts/bench-sandbox.sh`, [docs/benchmarks/README.md](../benchmarks/README.md) | Yes |
 
 ## Remaining (optional hardening)
 
-- Pure in-tree KVM (no Firecracker child) for production guests
-- Full eBPF TC programs beyond nftables + bpftool detection
-- Guest port discovery / multi-port proxy defaults
-- Published density/cold-start benchmarks
+- Production-grade in-tree KVM guests (virtio-blk from rootfs, vsock, snapshots without Firecracker)
+- Full eBPF TC programs beyond nftables + the TC stub script
+- Published density/cold-start numbers from your lab hardware
+
+## Host config
+
+```toml
+# config.toml
+fluxvm_engine = "firecracker"   # default
+# fluxvm_engine = "kvm"         # no Firecracker child — in-tree KVM thread
+
+[sandbox]
+http_proxy_default_port = 8080
+```
 
 ## Where FluxVM is ahead or different
 

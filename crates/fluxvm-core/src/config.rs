@@ -39,6 +39,19 @@ pub struct Config {
     pub storage: StorageConfig,
     /// Agent-sandbox features (AutoPause, egress, templates) — FluxVm backend.
     pub sandbox: SandboxConfig,
+    /// KVM engine for `BackendKind::FluxVm`: Firecracker child (default) or
+    /// in-tree pure KVM via `fluxvm-hypervisor`.
+    #[serde(default)]
+    pub fluxvm_engine: FluxVmEngine,
+}
+
+/// Which guest runner backs the FluxVM hypervisor control plane.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FluxVmEngine {
+    #[default]
+    Firecracker,
+    Kvm,
 }
 
 impl Default for Config {
@@ -66,6 +79,7 @@ impl Default for Config {
             catalog: CatalogConfig::default(),
             storage: StorageConfig::default(),
             sandbox: SandboxConfig::default(),
+            fluxvm_engine: FluxVmEngine::default(),
         }
     }
 }
@@ -86,6 +100,13 @@ pub struct SandboxConfig {
     pub templates_dir: Option<PathBuf>,
     /// Bind address for the live L7 egress proxy (empty = disabled).
     pub egress_proxy_listen: String,
+    /// Default guest port for `/sandbox/{id}/…` when no port is in the path.
+    #[serde(default = "default_http_proxy_port")]
+    pub http_proxy_default_port: u16,
+}
+
+fn default_http_proxy_port() -> u16 {
+    8080
 }
 
 impl Default for SandboxConfig {
@@ -97,6 +118,7 @@ impl Default for SandboxConfig {
             credential_vault: Vec::new(),
             templates_dir: None,
             egress_proxy_listen: String::new(),
+            http_proxy_default_port: default_http_proxy_port(),
         }
     }
 }
@@ -147,6 +169,10 @@ pub struct CatalogConfig {
     /// *every* catalog entry used to create a VM must carry a valid
     /// signature from one of these keys — there is no per-entry opt-out.
     pub trusted_signers: Vec<String>,
+    /// Optional cosign/Sigstore identity strings. When non-empty, resolve
+    /// shells out to `cosign verify-blob` against the local image path
+    /// (requires `cosign` on PATH).
+    pub cosign_identities: Vec<String>,
 }
 
 /// Firecracker-only: runs the VM through Firecracker's own `jailer` binary
@@ -186,16 +212,54 @@ impl Default for JailerConfig {
 }
 
 /// REST API bearer-token auth, enforced by `fluxvm-api`'s auth middleware.
-/// Empty `tokens` (the default) disables auth entirely — every request is
-/// treated as [`Role::Admin`] — matching the pre-auth MVP behavior for
-/// operators who haven't opted in. This is separate from, and unrelated to,
-/// the per-VM vsock guest-agent token (`AgentSpec::token`): that one
-/// protects the guest from other host processes; this one protects the
-/// daemon's own HTTP surface from callers who shouldn't reach it at all.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Empty `tokens` with `require` false keeps local-dev open (admin). When
+/// `require` is true, or when listen is non-loopback and tokens are empty,
+/// the API refuses to serve mutating routes without tokens (fail-closed).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AuthConfig {
     pub tokens: Vec<ApiToken>,
+    /// When true, empty `tokens` is rejected at serve-time (and middleware
+    /// returns 401). Defaults false for loopback ergonomics.
+    pub require: bool,
+    /// Per-token concurrent VM quota (None = unlimited). Checked at create.
+    pub max_vms_per_token: Option<usize>,
+    /// Per-token aggregate memory MiB quota.
+    pub max_memory_mib_per_token: Option<u64>,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            tokens: Vec::new(),
+            require: false,
+            max_vms_per_token: None,
+            max_memory_mib_per_token: None,
+        }
+    }
+}
+
+impl AuthConfig {
+    /// Fail closed when explicitly required, or when binding off-loopback
+    /// with no tokens configured.
+    pub fn must_authenticate(&self, listen: &str) -> bool {
+        if self.require {
+            return true;
+        }
+        if self.tokens.is_empty() && !is_loopback_listen(listen) {
+            return true;
+        }
+        !self.tokens.is_empty()
+    }
+}
+
+pub fn is_loopback_listen(listen: &str) -> bool {
+    listen.starts_with("127.0.0.1:")
+        || listen.starts_with("localhost:")
+        || listen.starts_with("[::1]:")
+        || listen == "127.0.0.1"
+        || listen == "localhost"
+        || listen == "::1"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -254,6 +318,12 @@ pub struct Policy {
     /// containment guarantee — sufficient to stop tenants pointing at
     /// arbitrary host paths, not a sandboxing boundary).
     pub allowed_image_dirs: Option<Vec<PathBuf>>,
+    /// If set, only these network modes are admitted (`none`, `user`,
+    /// `tap`, `macvtap`).
+    pub allowed_network_modes: Option<Vec<String>>,
+    /// When false (default), non-empty `extra_args` is rejected.
+    #[serde(default)]
+    pub allow_extra_args: bool,
 }
 
 impl Config {

@@ -5,11 +5,17 @@
 //! in-tree KVM demo path remains available for freestanding netboot.
 
 use crate::api::BootConfig;
+use crate::config::{GuestKind, VmConfig};
+use crate::VirtualMachine;
 use anyhow::{bail, Context, Result};
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -18,15 +24,92 @@ use tracing::info;
 
 const FC_API_TIMEOUT: Duration = Duration::from_secs(10);
 
+enum GuestEngine {
+    Firecracker {
+        child: Child,
+        api_sock: PathBuf,
+    },
+    Kvm {
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    },
+}
+
 pub struct GuestHandle {
-    pub child: Child,
-    pub api_sock: PathBuf,
     pub workspace: PathBuf,
+    engine: GuestEngine,
 }
 
 impl Drop for GuestHandle {
     fn drop(&mut self) {
-        let _ = self.child.start_kill();
+        match &mut self.engine {
+            GuestEngine::Firecracker { child, .. } => {
+                let _ = child.start_kill();
+            }
+            GuestEngine::Kvm { stop, thread } => {
+                stop.store(true, Ordering::SeqCst);
+                if let Some(t) = thread.take() {
+                    let _ = t.join();
+                }
+            }
+        }
+    }
+}
+
+impl GuestHandle {
+    pub async fn pause(&self) -> Result<()> {
+        match &self.engine {
+            GuestEngine::Firecracker { api_sock, .. } => pause(api_sock).await,
+            GuestEngine::Kvm { .. } => Ok(()),
+        }
+    }
+
+    pub async fn resume(&self) -> Result<()> {
+        match &self.engine {
+            GuestEngine::Firecracker { api_sock, .. } => resume(api_sock).await,
+            GuestEngine::Kvm { .. } => Ok(()),
+        }
+    }
+
+    pub async fn shutdown(mut self) -> Result<()> {
+        match &mut self.engine {
+            GuestEngine::Firecracker { child, api_sock } => {
+                shutdown(api_sock).await.ok();
+                let _ = child.kill().await;
+            }
+            GuestEngine::Kvm { stop, thread } => {
+                stop.store(true, Ordering::SeqCst);
+                if let Some(t) = thread.take() {
+                    let _ = t.join();
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn snapshot_create(&self, vmstate: &Path, mem: &Path) -> Result<()> {
+        match &self.engine {
+            GuestEngine::Firecracker { api_sock, .. } => {
+                snapshot_create(api_sock, vmstate, mem).await
+            }
+            GuestEngine::Kvm { .. } => {
+                bail!("memory snapshots require fluxvm_engine=firecracker")
+            }
+        }
+    }
+
+    pub fn kill(&mut self) {
+        match &mut self.engine {
+            GuestEngine::Firecracker { child, .. } => {
+                let _ = child.start_kill();
+            }
+            GuestEngine::Kvm { stop, thread } => {
+                stop.store(true, Ordering::SeqCst);
+                if let Some(t) = thread.take() {
+                    let _ = t.join();
+                }
+            }
+        }
     }
 }
 
@@ -86,9 +169,62 @@ pub async fn start(cfg: &BootConfig, workspace: &Path) -> Result<GuestHandle> {
         "Firecracker guest started under fluxvm-hypervisor"
     );
     Ok(GuestHandle {
-        child,
-        api_sock,
         workspace: workspace.to_path_buf(),
+        engine: GuestEngine::Firecracker { child, api_sock },
+    })
+}
+
+/// Boot via the in-tree KVM path (no Firecracker child process).
+pub async fn start_kvm(cfg: &BootConfig, workspace: &Path) -> Result<GuestHandle> {
+    fs::create_dir_all(workspace)?;
+    let vm_cfg = boot_to_vm_config(cfg)?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_thread = Arc::clone(&stop);
+    let ws = workspace.to_path_buf();
+    let thread = std::thread::spawn(move || {
+        match VirtualMachine::from_boot_config(vm_cfg) {
+            Ok(vm) => {
+                if let Err(e) = vm.run_until(stop_thread) {
+                    eprintln!("[kvm-engine] run error: {e}");
+                }
+            }
+            Err(e) => eprintln!("[kvm-engine] instantiate failed: {e:#}"),
+        }
+        let _ = ws;
+    });
+    info!("in-tree KVM engine guest thread started");
+    Ok(GuestHandle {
+        workspace: workspace.to_path_buf(),
+        engine: GuestEngine::Kvm {
+            stop,
+            thread: Some(thread),
+        },
+    })
+}
+
+fn boot_to_vm_config(cfg: &BootConfig) -> Result<VmConfig> {
+    Ok(VmConfig {
+        memory_mib: cfg.memory_mib.min(u32::MAX as u64) as u32,
+        cpus: cfg.vcpus,
+        guest: GuestKind::Linux,
+        kernel: Some(cfg.kernel.clone()),
+        initrd: cfg.initrd.clone(),
+        disk: Some(cfg.rootfs.clone()),
+        tap: cfg.tap.clone(),
+        mac: cfg
+            .mac
+            .clone()
+            .unwrap_or_else(|| "02:00:AC:10:00:02".into()),
+        vhost_net: true,
+        net_queues: 1,
+        cmdline: cfg
+            .kernel_args
+            .clone()
+            .unwrap_or_else(|| "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw".into()),
+        firmware: None,
+        net_mbit_limit: 0,
+        dry_run: false,
+        print_host_net: false,
     })
 }
 
@@ -254,9 +390,8 @@ pub async fn start_from_snapshot(
         "Firecracker restored from memory snapshot"
     );
     Ok(GuestHandle {
-        child,
-        api_sock,
         workspace: workspace.to_path_buf(),
+        engine: GuestEngine::Firecracker { child, api_sock },
     })
 }
 

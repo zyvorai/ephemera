@@ -119,6 +119,23 @@ async fn try_handshake(socket: &Path) -> std::io::Result<QmpHalves> {
     Ok((reader, write_half))
 }
 
+/// Save VM state to an internal snapshot tagged `name` on the VM's disk
+/// (pairs with QEMU `-loadvm` / `start_from_snapshot`).
+pub async fn savevm(socket: &Path, name: &str, timeout: Duration) -> Result<Value> {
+    execute(
+        socket,
+        "human-monitor-command",
+        Some(json!({"command-line": format!("savevm {name}")})),
+        timeout,
+    )
+    .await
+}
+
+/// Alias for callers that prefer snapshot-oriented naming.
+pub async fn snapshot_create(socket: &Path, name: &str, timeout: Duration) -> Result<Value> {
+    savevm(socket, name, timeout).await
+}
+
 async fn execute_inner(socket: &Path, command: &str, args: Option<Value>) -> Result<Value> {
     let (mut reader, mut write_half) = handshake_retrying(socket).await?;
 

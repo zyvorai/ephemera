@@ -27,14 +27,12 @@ use serde::{Deserialize, Serialize};
 )]
 #[serde(rename_all = "camelCase")]
 pub struct DisposableVmSpec {
-    /// Node this VM must run on (matched against `NODE_NAME`/`--node-name`
-    /// the operator on that node was started with — see `main.rs`). A
-    /// `DisposableVm` with no `node` set, or one that doesn't match any
-    /// running operator's node name, is never picked up by any instance;
-    /// this project has no central scheduler to place it for you (see
-    /// README's "Production changes" — distributed node-agent/central
-    /// placement is still a deferred item).
-    pub node: String,
+    /// Node this VM must run on. Optional when a cluster placer
+    /// (`fluxvm-kube --enable-placement`) is running — it fills this in.
+    /// A `DisposableVm` with no `node` set is ignored by node-local
+    /// operators until placement assigns one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
     /// One of "qemu", "cloud-hypervisor", "firecracker", "auto" — passed
     /// straight through to the local fluxvm's `CreateVmRequest.backend`.
     #[serde(default = "default_backend")]
@@ -49,17 +47,26 @@ pub struct DisposableVmSpec {
     pub memory_mib: u64,
     #[serde(default)]
     pub disk_size_gib: Option<u64>,
-    /// "none" (default) or "user" — the two networking modes that need no
-    /// host-specific device/bridge name in the CR itself. `tap`/`macvtap`
-    /// need a `tap_name`/`bridge`/`parent` this CRD doesn't expose yet.
+    /// "none", "user", "tap", or "macvtap". Tap needs optional `bridge`/
+    /// `tapName`/`mac`/`netns`; macvtap needs `parent` (+ optional
+    /// `macvtapMode`/`mac`).
     #[serde(default = "default_network_mode")]
     pub network_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tap_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mac: Option<String>,
+    #[serde(default)]
+    pub netns: bool,
+    /// Parent link for `networkMode: macvtap` (required in that mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub macvtap_mode: Option<String>,
     /// One of "default", "lvm-thin", "nbd", "ceph-rbd" — see README's
-    /// "Storage backends". "default" (qcow2/raw) needs no other host setup;
-    /// the other three assume the local fluxvm's config/host already has
-    /// the matching infrastructure (a thin pool, `qemu-nbd`, a Ceph
-    /// cluster) — this CRD doesn't validate that ahead of time, the same
-    /// way a raw `POST /v1/vms` doesn't either.
+    /// "Storage backends".
     #[serde(default = "default_storage")]
     pub storage: String,
     #[serde(default)]

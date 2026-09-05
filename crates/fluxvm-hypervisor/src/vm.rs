@@ -9,7 +9,10 @@ use crate::ffi;
 use crate::kvm::KvmVm;
 use crate::memory::{GuestMemory, GUEST_STACK, KERNEL_LOAD_ADDR, MMIO_WINDOW};
 use crate::tap::Tap;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 pub struct VirtualMachine {
@@ -72,6 +75,47 @@ impl VirtualMachine {
         })
     }
 
+    /// Boot from an external kernel/initrd (FluxVM `engine=kvm` path).
+    pub fn from_boot_config(cfg: VmConfig) -> Result<Self> {
+        cfg.validate()?;
+        let mut mem = GuestMemory::allocate(cfg.memory_bytes())?;
+        let _cr3 = boot::build_identity_page_tables(&mut mem)?;
+        let boot_info = boot::prepare(&mut mem, &cfg)?;
+        let mut notes = boot_info.notes;
+
+        let mut bus = Bus::new();
+        bus.add_pio(Arc::new(Serial16550::com1()));
+
+        let mac = VirtioNetConfig::parse_mac(&cfg.mac).unwrap_or([0x02, 0, 0, 0, 0, 2]);
+        let net = Arc::new(VirtioMmio::net(MMIO_WINDOW, mac));
+        bus.add_mmio(net.clone());
+
+        let tap = if let Some(tap_name) = &cfg.tap {
+            match Tap::open(tap_name, [192, 168, 100, 1]) {
+                Ok(t) => {
+                    notes.push(format!("TAP {} attached", t.name));
+                    Some(t)
+                }
+                Err(e) => {
+                    notes.push(format!("TAP optional: {e}"));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        Ok(Self {
+            cfg,
+            mem,
+            bus: Arc::new(bus),
+            net: Some(net),
+            tap,
+            boot_rip: boot_info.entry_rip,
+            notes,
+        })
+    }
+
     pub fn dump(&self) -> String {
         let mut s = format!(
             "FluxVM  cpus={}  ram={} MiB  rip={:#x}\n",
@@ -87,17 +131,22 @@ impl VirtualMachine {
         s
     }
 
-    pub fn run(mut self) -> Result<String> {
+    pub fn run(self) -> Result<String> {
+        self.run_until(Arc::new(AtomicBool::new(false)))
+    }
+
+    pub fn run_until(mut self, stop: Arc<AtomicBool>) -> Result<String> {
         let cr3 = 0x8000u64;
         let mut kvm = KvmVm::create(&self.mem)?;
         kvm.setup_long_mode(&mut self.mem, self.boot_rip, GUEST_STACK, cr3)?;
         eprintln!("[kvm] long mode rip={:#x} cr3={cr3:#x}", self.boot_rip);
 
         let mut serial_log = String::new();
-        let deadline = Instant::now() + Duration::from_secs(8);
+        let deadline = Instant::now() + Duration::from_secs(3600);
         let mut exits = 0u64;
+        let mut this = self;
 
-        while Instant::now() < deadline {
+        while Instant::now() < deadline && !stop.load(Ordering::Relaxed) {
             let reason = kvm.run_once()?;
             exits += 1;
             if exits <= 20 {
@@ -109,7 +158,7 @@ impl VirtualMachine {
                     let n = (size as u32 * count) as usize;
                     if dir == ffi::KVM_EXIT_IO_OUT {
                         let data = kvm.io_data(off, n).to_vec();
-                        self.bus.pio_write(port, &data)?;
+                        this.bus.pio_write(port, &data)?;
                         for b in data {
                             if b.is_ascii() && (b >= 32 || b == b'\n' || b == b'\r') {
                                 serial_log.push(b as char);
@@ -117,26 +166,26 @@ impl VirtualMachine {
                         }
                     } else {
                         let mut buf = vec![0u8; n];
-                        self.bus.pio_read(port, &mut buf)?;
+                        this.bus.pio_read(port, &mut buf)?;
                         kvm.io_data_mut(off, n).copy_from_slice(&buf);
                     }
                 }
                 ffi::KVM_EXIT_MMIO => {
                     let (addr, data, _len, is_write) = kvm.mmio_info();
                     if is_write {
-                        let _ = self.bus.mmio_write(addr, &data);
+                        let _ = this.bus.mmio_write(addr, &data);
                     } else {
                         let mut buf = data;
-                        let _ = self.bus.mmio_read(addr, &mut buf);
+                        let _ = this.bus.mmio_read(addr, &mut buf);
                         kvm.mmio_set_data(&buf);
                     }
-                    if let Some(net) = &self.net {
+                    if let Some(net) = &this.net {
                         if let Some(q) = virtio_mmio::take_notify(&net.state) {
                             let mut st = net.state.lock().unwrap();
                             match virtio_net::handle_notify(
-                                &mut self.mem,
+                                &mut this.mem,
                                 &mut st,
-                                self.tap.as_ref(),
+                                this.tap.as_ref(),
                                 q,
                             ) {
                                 Ok(n) => eprintln!("[net] processed q={q} frames={n}"),

@@ -6,6 +6,7 @@ use chrono::{Duration, Utc};
 use fluxvm_core::{
     backend::{LaunchContext, VmBackend},
     config::Config,
+    metrics,
     model::{
         BackendKind, ClaimOverrides, CloudInitSpec, CreateVmRequest, NetworkSpec, PoolRecord,
         PoolSpec, StorageBackend, VmRecord, VmStatus,
@@ -125,6 +126,20 @@ fn validate_policy(req: &CreateVmRequest, cfg: &Config) -> Result<()> {
                 dirs
             );
         }
+    }
+    if let Some(modes) = &p.allowed_network_modes {
+        let mode = match &req.network {
+            fluxvm_core::model::NetworkSpec::None => "none",
+            fluxvm_core::model::NetworkSpec::User { .. } => "user",
+            fluxvm_core::model::NetworkSpec::Tap { .. } => "tap",
+            fluxvm_core::model::NetworkSpec::Macvtap { .. } => "macvtap",
+        };
+        if !modes.iter().any(|m| m == mode) {
+            bail!("network mode '{mode}' is not permitted by policy allowed_network_modes {modes:?}");
+        }
+    }
+    if !p.allow_extra_args && !req.extra_args.is_empty() {
+        bail!("policy forbids extra_args (set policy.allow_extra_args = true to permit)");
     }
     Ok(())
 }
@@ -415,6 +430,7 @@ impl VmManager {
     }
 
     pub async fn create(self: &Arc<Self>, mut req: CreateVmRequest) -> Result<VmRecord> {
+        let started = std::time::Instant::now();
         // Resolve BackendKind::Auto before anything else — everything below
         // (the disk filename, the persisted record, the launch dispatch)
         // assumes a concrete backend and must never see Auto.
@@ -554,6 +570,11 @@ impl VmManager {
                 (None, _) => None,
             };
 
+            let guest_cidr_for_policy = network
+                .guest_cidr
+                .clone()
+                .or_else(|| record.guest_ip.as_ref().map(|ip| format!("{ip}/32")));
+
             let ctx = LaunchContext {
                 id,
                 workspace: workspace.clone(),
@@ -578,11 +599,30 @@ impl VmManager {
             Self::attach_cgroup(id, launch.pid, &mut record);
             record.status = VmStatus::Running;
             if req.backend == BackendKind::FluxVm {
-                if let Some(ip) = &record.guest_ip {
-                    let guest_cidr = format!("{ip}/32");
-                    if let Err(e) =
-                        fluxvm_network::dataplane::apply_sandbox_policy(id, &guest_cidr, &[])
+                if !self.cfg.sandbox.egress_proxy_listen.is_empty() {
+                    if let Ok(addr) = self.cfg.sandbox.egress_proxy_listen.parse::<std::net::SocketAddr>()
                     {
+                        if let Err(e) =
+                            fluxvm_network::egress::apply_egress_redirect(addr.port())
+                        {
+                            tracing::warn!(vm = %id, error = %e, "egress redirect nftables apply failed");
+                        }
+                    }
+                }
+                if let Some(guest_cidr) = guest_cidr_for_policy {
+                    let allow_cidrs = if self.cfg.sandbox.egress_allow_domains.is_empty() {
+                        vec![]
+                    } else {
+                        fluxvm_network::egress::resolve_allow_cidrs(
+                            &self.cfg.sandbox.egress_allow_domains,
+                        )
+                        .await
+                    };
+                    if let Err(e) = fluxvm_network::dataplane::apply_sandbox_policy(
+                        id,
+                        &guest_cidr,
+                        &allow_cidrs,
+                    ) {
                         tracing::warn!(vm = %id, error = %e, "nftables dataplane apply failed");
                     }
                 }
@@ -594,7 +634,14 @@ impl VmManager {
         if let Err(e) = result {
             if let Some(tap) = &record.tap_name {
                 let _ =
-                    fluxvm_network::cleanup(id, &req.network, tap, record.netns.as_deref()).await;
+                    fluxvm_network::cleanup(
+                        &self.cfg.state_dir,
+                        id,
+                        &req.network,
+                        tap,
+                        record.netns.as_deref(),
+                    )
+                    .await;
             }
             // A later step (network prep, launch) can fail after the disk
             // was already provisioned — don't leak the LV/qemu-nbd process.
@@ -611,6 +658,7 @@ impl VmManager {
         }
         self.touch_activity(id).await;
         self.store.update(record.clone()).await?;
+        metrics::record_vm_create(started.elapsed().as_millis() as u64);
         Ok(record)
     }
 
@@ -682,7 +730,30 @@ impl VmManager {
         self.start_impl(id, Some(tag)).await
     }
 
+    /// Save full VM state so a later [`Self::start_from_snapshot`] can restore it.
+    /// QEMU uses an internal `savevm` tag on the VM disk; Cloud Hypervisor writes
+    /// a snapshot directory under `<workspace>/snapshots/<tag>/`.
+    pub async fn create_vm_snapshot(self: &Arc<Self>, id: Uuid, tag: &str) -> Result<()> {
+        let vm = self.get(id).await?;
+        if vm.status != VmStatus::Running && vm.status != VmStatus::Paused {
+            bail!(
+                "snapshot requires a running or paused VM (status={:?})",
+                vm.status
+            );
+        }
+        match vm.backend {
+            BackendKind::Qemu => fluxvm_qemu::snapshot_save(&self.cfg, &vm, tag).await,
+            BackendKind::CloudHypervisor => {
+                let dest = vm.workspace.join("snapshots").join(tag);
+                tokio::fs::create_dir_all(&dest).await?;
+                fluxvm_cloud_hypervisor::snapshot_save(&self.cfg, &vm, &dest).await
+            }
+            other => bail!("snapshot not supported for backend {other:?}"),
+        }
+    }
+
     async fn start_impl(self: &Arc<Self>, id: Uuid, loadvm_tag: Option<&str>) -> Result<VmRecord> {
+        let started = std::time::Instant::now();
         let mut vm = self.get(id).await?;
         if vm.status == VmStatus::Running {
             return Ok(vm);
@@ -755,8 +826,14 @@ impl VmManager {
 
         if let Err(e) = result {
             if let Some(tap) = &vm.tap_name {
-                let _ = fluxvm_network::cleanup(id, &vm.request.network, tap, vm.netns.as_deref())
-                    .await;
+                let _ = fluxvm_network::cleanup(
+                    &self.cfg.state_dir,
+                    id,
+                    &vm.request.network,
+                    tap,
+                    vm.netns.as_deref(),
+                )
+                .await;
             }
             vm.status = VmStatus::Failed;
             vm.error = Some(format!("{e:#}"));
@@ -764,6 +841,7 @@ impl VmManager {
             return Err(e);
         }
         self.store.update(vm.clone()).await?;
+        metrics::record_vm_start(started.elapsed().as_millis() as u64);
         Ok(vm)
     }
 
@@ -791,7 +869,14 @@ impl VmManager {
         }
         if let Some(tap) = &vm.tap_name {
             let _ =
-                fluxvm_network::cleanup(id, &vm.request.network, tap, vm.netns.as_deref()).await;
+                fluxvm_network::cleanup(
+                    &self.cfg.state_dir,
+                    id,
+                    &vm.request.network,
+                    tap,
+                    vm.netns.as_deref(),
+                )
+                .await;
         }
         vm.netns = None;
         // virtiofsd instances aren't reattachable the way qemu-nbd's export
@@ -1071,6 +1156,7 @@ impl VmManager {
                         vm.pid = None;
                         if let Some(tap) = &vm.tap_name {
                             let _ = fluxvm_network::cleanup(
+                                &self.cfg.state_dir,
                                 vm.id,
                                 &vm.request.network,
                                 tap,
@@ -1379,11 +1465,15 @@ mod tests {
             qga: None,
             storage: StorageBackend::Default,
             shared_folders: vec![],
+            numa_node: None,
+            cpuset: None,
+            hugepages: None,
+            vfio_devices: vec![],
         }
     }
 
     #[test]
-    fn effective_cloud_init_is_unchanged_with_no_shares() {
+    fn effective_cloud_init_returns_none_without_seed_or_shares() {
         let r = req(BackendKind::Qemu, None, None);
         assert!(VmManager::effective_cloud_init(&r).is_none());
     }

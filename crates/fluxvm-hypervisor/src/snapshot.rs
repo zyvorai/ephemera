@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::api::SnapshotSpec;
-use crate::guest;
 use crate::state::{VmLifecycle, VmState};
 use anyhow::{bail, Context, Result};
 use std::fs;
@@ -22,10 +21,11 @@ pub async fn save(st: &VmState, path: &Path) -> Result<()> {
     let vmstate = path.with_extension("vmstate");
 
     // Guest must be paused (caller should have paused; ensure here).
-    guest::pause(&guest.api_sock).await.ok();
-    guest::snapshot_create(&guest.api_sock, &vmstate, &mem_snap)
+    guest.pause().await.ok();
+    guest
+        .snapshot_create(&vmstate, &mem_snap)
         .await
-        .context("Firecracker snapshot/create")?;
+        .context("guest snapshot/create")?;
 
     clone_cow(&boot.rootfs, &disk_snap)
         .with_context(|| format!("cloning rootfs to {}", disk_snap.display()))?;

@@ -83,7 +83,7 @@ async fn reconcile(obj: Arc<DisposableVm>, ctx: Arc<Context>) -> Result<Action, 
     // running on). Every instance still gets a watch event for every CR in
     // the cluster (Api::all has no server-side field selector on a custom
     // field like spec.node), so this per-node filter has to happen here.
-    if obj.spec.node != ctx.node_name {
+    if obj.spec.node.as_deref() != Some(ctx.node_name.as_str()) {
         return Ok(Action::await_change());
     }
     let ns = obj.namespace().unwrap_or_else(|| "default".into());

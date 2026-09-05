@@ -109,38 +109,52 @@ start_fluxvm "$NODE" "$NODE_IMAGE" | grep -q '"ok":true' \
     && pass "fluxvm serve up on node host ($NODE_HOST)" \
     || { fail "fluxvm serve failed on node host"; exit 1; }
 
-section "Starting the central fleet registry"
+FLEET_TOKEN="${FLEET_TOKEN:-fleet-test-token}"
+AUTH_H="Authorization: Bearer ${FLEET_TOKEN}"
+
+section "Starting the central fleet registry (bearer auth + persisted state)"
 ssh "$CENTRAL" "
     AGENT=\$(ls \$HOME/.deployments/fluxvm/target/release/fluxvm-agent)
-    \"\$AGENT\" central --listen 0.0.0.0:${CENTRAL_FLEET_PORT} > /tmp/fluxvm-fleet-test/central.log 2>&1 < /dev/null &
+    mkdir -p /tmp/fluxvm-fleet-test/agent-state
+    FLUXVM_AGENT_TOKEN='${FLEET_TOKEN}' \"\$AGENT\" central \
+        --listen 0.0.0.0:${CENTRAL_FLEET_PORT} \
+        --state-dir /tmp/fluxvm-fleet-test/agent-state \
+        --token '${FLEET_TOKEN}' \
+        > /tmp/fluxvm-fleet-test/central.log 2>&1 < /dev/null &
     disown
     sleep 2
     curl -sS http://127.0.0.1:${CENTRAL_FLEET_PORT}/healthz
 " | grep -q '"ok":true' && pass "central fleet registry is up" || { fail "central registry failed to start"; exit 1; }
+
+# Unauthenticated /fleet/nodes must fail when token is set.
+UNAUTH=$(ssh "$CENTRAL" "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/nodes" || true)
+[ "$UNAUTH" = "401" ] && pass "central rejects unauthenticated /fleet/nodes" || fail "expected 401 without token, got ${UNAUTH}"
 
 section "Starting both node agents, pointed at the real remote central"
 ssh "$CENTRAL" "
     AGENT=\$(ls \$HOME/.deployments/fluxvm/target/release/fluxvm-agent)
     NODE_NAME=node-a CENTRAL_URL=http://${CENTRAL_HOST}:${CENTRAL_FLEET_PORT} \
     FLUXVM_URL=http://127.0.0.1:${CENTRAL_EPH_PORT} ADVERTISE_URL=http://${CENTRAL_HOST}:${CENTRAL_EPH_PORT} \
-    \"\$AGENT\" node --interval-secs 5 > /tmp/fluxvm-fleet-test/node-agent.log 2>&1 < /dev/null &
+    FLUXVM_AGENT_TOKEN='${FLEET_TOKEN}' \
+    \"\$AGENT\" node --interval-secs 5 --token '${FLEET_TOKEN}' > /tmp/fluxvm-fleet-test/node-agent.log 2>&1 < /dev/null &
     disown
 "
 ssh "$NODE" "
     AGENT=\$(ls \$HOME/.deployments/fluxvm/target/release/fluxvm-agent)
     NODE_NAME=node-b CENTRAL_URL=http://${CENTRAL_HOST}:${CENTRAL_FLEET_PORT} \
     FLUXVM_URL=http://127.0.0.1:${NODE_EPH_PORT} ADVERTISE_URL=http://${NODE_HOST}:${NODE_EPH_PORT} \
-    \"\$AGENT\" node --interval-secs 5 > /tmp/fluxvm-fleet-test/node-agent.log 2>&1 < /dev/null &
+    FLUXVM_AGENT_TOKEN='${FLEET_TOKEN}' \
+    \"\$AGENT\" node --interval-secs 5 --token '${FLEET_TOKEN}' > /tmp/fluxvm-fleet-test/node-agent.log 2>&1 < /dev/null &
     disown
 "
 sleep 7
-NODES_JSON=$(ssh "$CENTRAL" "curl -sS http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/nodes")
+NODES_JSON=$(ssh "$CENTRAL" "curl -sS -H '${AUTH_H}' http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/nodes")
 echo "$NODES_JSON" | python3 -m json.tool
 HEALTHY_COUNT=$(echo "$NODES_JSON" | python3 -c "import json,sys; print(sum(1 for n in json.load(sys.stdin)['items'] if n['healthy']))")
 [ "$HEALTHY_COUNT" = "2" ] && pass "both real hosts registered and healthy, with real capacity info" || fail "expected 2 healthy nodes, got ${HEALTHY_COUNT}"
 
-section "Fleet create with no explicit node picks the least-loaded host"
-VM1=$(ssh "$CENTRAL" "curl -sS -X POST http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/vms -H 'content-type: application/json' -d '{\"name\":\"fleet-vm-1\",\"backend\":\"qemu\",\"image\":\"${CENTRAL_IMAGE}\",\"vcpus\":1,\"memory_mib\":768,\"network\":{\"mode\":\"none\"},\"ttl_seconds\":600}'")
+section "Fleet create with no explicit node picks residual-capacity host"
+VM1=$(ssh "$CENTRAL" "curl -sS -X POST http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/vms -H 'content-type: application/json' -H '${AUTH_H}' -d '{\"name\":\"fleet-vm-1\",\"backend\":\"qemu\",\"image\":\"${CENTRAL_IMAGE}\",\"vcpus\":1,\"memory_mib\":768,\"network\":{\"mode\":\"none\"},\"ttl_seconds\":600}'")
 VM1_NODE=$(echo "$VM1" | python3 -c "import json,sys; print(json.load(sys.stdin)['node'])")
 VM1_ID=$(echo "$VM1" | python3 -c "import json,sys; print(json.load(sys.stdin)['vm']['id'])")
 [ -n "$VM1_ID" ] && pass "first VM created via fleet API, landed on ${VM1_NODE}" || fail "first fleet create failed"
@@ -152,7 +166,7 @@ ssh "$VM1_HOST" "sudo ps aux | grep 'qemu-system.*${VM1_ID:0:8}' | grep -v grep"
 
 sleep 7
 section "A second create lands on the other host once load is known"
-VM2=$(ssh "$CENTRAL" "curl -sS -X POST http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/vms -H 'content-type: application/json' -d '{\"name\":\"fleet-vm-2\",\"backend\":\"qemu\",\"image\":\"${NODE_IMAGE}\",\"vcpus\":1,\"memory_mib\":768,\"network\":{\"mode\":\"none\"},\"ttl_seconds\":600}'")
+VM2=$(ssh "$CENTRAL" "curl -sS -X POST http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/vms -H 'content-type: application/json' -H '${AUTH_H}' -d '{\"name\":\"fleet-vm-2\",\"backend\":\"qemu\",\"image\":\"${NODE_IMAGE}\",\"vcpus\":1,\"memory_mib\":768,\"network\":{\"mode\":\"none\"},\"ttl_seconds\":600}'")
 VM2_NODE=$(echo "$VM2" | python3 -c "import json,sys; print(json.load(sys.stdin)['node'])")
 VM2_ID=$(echo "$VM2" | python3 -c "import json,sys; print(json.load(sys.stdin)['vm']['id'])")
 if [ "$VM2_NODE" != "$VM1_NODE" ]; then
@@ -162,7 +176,7 @@ else
 fi
 
 section "GET /fleet/vms aggregates both real VMs, correctly tagged"
-LIST=$(ssh "$CENTRAL" "curl -sS http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/vms")
+LIST=$(ssh "$CENTRAL" "curl -sS -H '${AUTH_H}' http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/vms")
 FOUND=$(echo "$LIST" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
@@ -173,7 +187,7 @@ print('ok' if ids.get('$VM1_ID') == '$VM1_NODE' and ids.get('$VM2_ID') == '$VM2_
 
 section "Deleting via the fleet proxy reaps the right VM on the right host"
 if [ "$VM2_NODE" = "node-a" ]; then VM2_HOST="$CENTRAL"; else VM2_HOST="$NODE"; fi
-ssh "$CENTRAL" "curl -sS -X DELETE http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/vms/${VM2_NODE}/${VM2_ID} -o /dev/null -w '%{http_code}'" | grep -q '^2' \
+ssh "$CENTRAL" "curl -sS -X DELETE http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/vms/${VM2_NODE}/${VM2_ID} -H '${AUTH_H}' -o /dev/null -w '%{http_code}'" | grep -q '^2' \
     && pass "fleet delete for VM2 returned success" || fail "fleet delete for VM2 failed"
 sleep 1
 ssh "$VM2_HOST" "sudo ps aux | grep 'qemu-system.*${VM2_ID:0:8}' | grep -v grep" >/dev/null \
@@ -183,7 +197,7 @@ ssh "$VM1_HOST" "sudo ps aux | grep 'qemu-system.*${VM1_ID:0:8}' | grep -v grep"
     && pass "VM1 on ${VM1_NODE} was left untouched by VM2's delete" \
     || fail "VM1 was incorrectly affected by VM2's delete"
 
-ssh "$CENTRAL" "curl -sS -X DELETE http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/vms/${VM1_NODE}/${VM1_ID}" >/dev/null 2>&1 || true
+ssh "$CENTRAL" "curl -sS -X DELETE http://127.0.0.1:${CENTRAL_FLEET_PORT}/fleet/vms/${VM1_NODE}/${VM1_ID} -H '${AUTH_H}'" >/dev/null 2>&1 || true
 
 section "Summary"
 echo "  pass: ${PASS}  fail: ${FAIL}"

@@ -53,46 +53,91 @@ impl IntoResponse for ApiError {
 type ApiResult<T> = Result<T, ApiError>;
 
 /// Bounces a request without a valid bearer token; requests that do have
-/// one carry their resolved `Role` onward as a request extension. When
-/// `cfg.auth.tokens` is empty, auth is off entirely and every request is
-/// treated as `Role::Admin` — this is what makes an un-opted-in deployment
-/// behave exactly like the pre-auth MVP.
+/// one carry their resolved `Role` (and optional token name) onward.
+/// Fail-closed when `auth.must_authenticate(listen)` is true.
 async fn auth_middleware(
     State(m): State<Arc<VmManager>>,
     mut req: Request,
     next: Next,
 ) -> Response {
-    if req.uri().path() == "/healthz" {
+    let path = req.uri().path().to_string();
+    let method = req.method().clone();
+    if path == "/healthz" {
         return next.run(req).await;
     }
-    let role = if m.cfg.auth.tokens.is_empty() {
-        Some(Role::Admin)
+    let must = m.cfg.auth.must_authenticate(&m.cfg.listen);
+    let (role, token_name) = if !must && m.cfg.auth.tokens.is_empty() {
+        (Some(Role::Admin), Some("anonymous-admin".to_string()))
+    } else if m.cfg.auth.tokens.is_empty() && must {
+        (None, None)
     } else {
         let presented = req
             .headers()
             .get(header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|h| h.strip_prefix("Bearer "));
-        presented.and_then(|t| {
+        match presented.and_then(|t| {
             m.cfg
                 .auth
                 .tokens
                 .iter()
                 .find(|entry| constant_time_eq(&entry.token, t))
-                .map(|entry| entry.role)
-        })
+        }) {
+            Some(entry) => (
+                Some(entry.role),
+                entry
+                    .name
+                    .clone()
+                    .or_else(|| Some("unnamed".into())),
+            ),
+            None => (None, None),
+        }
     };
     match role {
         Some(role) => {
             req.extensions_mut().insert(role);
-            next.run(req).await
+            if let Some(name) = token_name.clone() {
+                req.extensions_mut().insert(AuditActor(name));
+            }
+            let response = next.run(req).await;
+            audit_log(
+                token_name.as_deref().unwrap_or("anonymous"),
+                role,
+                &method,
+                &path,
+                response.status().as_u16(),
+            );
+            response
         }
-        None => (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "missing or invalid bearer token"})),
-        )
-            .into_response(),
+        None => {
+            fluxvm_core::metrics::inc_auth_deny();
+            audit_log("none", Role::ReadOnly, &method, &path, 401);
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "missing or invalid bearer token"})),
+            )
+                .into_response()
+        }
     }
+}
+
+#[derive(Clone, Debug)]
+struct AuditActor(pub String);
+
+fn audit_log(actor: &str, role: Role, method: &Method, path: &str, status: u16) {
+    let role = match role {
+        Role::Admin => "admin",
+        Role::ReadOnly => "read-only",
+    };
+    tracing::info!(
+        target: "fluxvm_audit",
+        actor = %actor,
+        role = %role,
+        method = %method,
+        path = %path,
+        status = status,
+        "audit"
+    );
 }
 
 fn require_admin(role: Role) -> ApiResult<()> {
@@ -113,6 +158,7 @@ pub fn router(manager: Arc<VmManager>) -> Router {
             "/v1/vms/{id}/start-from-snapshot",
             post(start_vm_from_snapshot),
         )
+        .route("/v1/vms/{id}/snapshot", post(snapshot_vm))
         .route("/v1/vms/{id}/stop", post(stop_vm))
         .route("/v1/vms/{id}/pause", post(pause_vm))
         .route("/v1/vms/{id}/resume", post(resume_vm))
@@ -239,6 +285,54 @@ fn render_metrics(vms: &[VmRecord]) -> String {
         .count();
     out.push_str(&format!("fluxvm_vms_agent_enabled {agent_enabled}\n"));
 
+    out.push_str(
+        "# HELP fluxvm_auth_deny_total REST requests rejected for missing or invalid bearer token.\n",
+    );
+    out.push_str("# TYPE fluxvm_auth_deny_total counter\n");
+    out.push_str(&format!(
+        "fluxvm_auth_deny_total {}\n",
+        fluxvm_core::metrics::auth_deny_total()
+    ));
+
+    out.push_str(
+        "# HELP fluxvm_egress_deny_total Outbound HTTP(S) requests denied by the L7 egress proxy.\n",
+    );
+    out.push_str("# TYPE fluxvm_egress_deny_total counter\n");
+    out.push_str(&format!(
+        "fluxvm_egress_deny_total {}\n",
+        fluxvm_core::metrics::egress_deny_total()
+    ));
+
+    out.push_str("# HELP fluxvm_vm_create_total VM create operations completed successfully.\n");
+    out.push_str("# TYPE fluxvm_vm_create_total counter\n");
+    out.push_str(&format!(
+        "fluxvm_vm_create_total {}\n",
+        fluxvm_core::metrics::vm_create_total()
+    ));
+    out.push_str(
+        "# HELP fluxvm_vm_create_duration_ms_total Cumulative wall time of successful VM creates in milliseconds.\n",
+    );
+    out.push_str("# TYPE fluxvm_vm_create_duration_ms_total counter\n");
+    out.push_str(&format!(
+        "fluxvm_vm_create_duration_ms_total {}\n",
+        fluxvm_core::metrics::vm_create_duration_ms_total()
+    ));
+
+    out.push_str("# HELP fluxvm_vm_start_total VM start (relaunch) operations completed successfully.\n");
+    out.push_str("# TYPE fluxvm_vm_start_total counter\n");
+    out.push_str(&format!(
+        "fluxvm_vm_start_total {}\n",
+        fluxvm_core::metrics::vm_start_total()
+    ));
+    out.push_str(
+        "# HELP fluxvm_vm_start_duration_ms_total Cumulative wall time of successful VM starts in milliseconds.\n",
+    );
+    out.push_str("# TYPE fluxvm_vm_start_duration_ms_total counter\n");
+    out.push_str(&format!(
+        "fluxvm_vm_start_duration_ms_total {}\n",
+        fluxvm_core::metrics::vm_start_duration_ms_total()
+    ));
+
     out
 }
 
@@ -265,10 +359,44 @@ fn backend_label(b: BackendKind) -> &'static str {
 async fn create_vm(
     State(m): State<Arc<VmManager>>,
     Extension(role): Extension<Role>,
+    actor: Option<Extension<AuditActor>>,
     Json(req): Json<CreateVmRequest>,
 ) -> ApiResult<impl IntoResponse> {
     require_admin(role)?;
+    enforce_token_quotas(&m, actor.as_ref().map(|a| a.0.0.as_str()), &req).await?;
     Ok((StatusCode::CREATED, Json(m.create(req).await?)))
+}
+
+async fn enforce_token_quotas(
+    m: &VmManager,
+    actor: Option<&str>,
+    req: &CreateVmRequest,
+) -> ApiResult<()> {
+    let Some(actor) = actor else {
+        return Ok(());
+    };
+    if actor == "anonymous-admin" || actor == "none" {
+        return Ok(());
+    }
+    let vms = m.list().await;
+    // Quotas are global per-token identity stored in labels via name prefix —
+    // count all VMs when max_vms_per_token is set (conservative).
+    if let Some(max) = m.cfg.auth.max_vms_per_token {
+        if vms.len() >= max {
+            return Err(ApiError::forbidden(format!(
+                "token '{actor}' at max_vms_per_token ({max})"
+            )));
+        }
+    }
+    if let Some(max_mem) = m.cfg.auth.max_memory_mib_per_token {
+        let used: u64 = vms.iter().map(|v| v.request.memory_mib).sum();
+        if used.saturating_add(req.memory_mib) > max_mem {
+            return Err(ApiError::forbidden(format!(
+                "token '{actor}' would exceed max_memory_mib_per_token ({max_mem})"
+            )));
+        }
+    }
+    Ok(())
 }
 
 async fn create_sandbox(
@@ -369,7 +497,11 @@ async fn sandbox_http_proxy_default_port(
     Path((id, path)): Path<(Uuid, String)>,
     req: Request,
 ) -> Response {
-    sandbox_proxy_inner(m, id, 8080, path, req).await
+    let port = match m.get(id).await {
+        Ok(vm) => m.sandbox_http_proxy_port(&vm).await,
+        Err(_) => m.cfg.sandbox.http_proxy_default_port,
+    };
+    sandbox_proxy_inner(m, id, port, path, req).await
 }
 
 async fn sandbox_http_proxy(
@@ -596,6 +728,23 @@ async fn start_vm_from_snapshot(
     require_admin(role)?;
     Ok(Json(json!(m.start_from_snapshot(id, &req.tag).await?)))
 }
+
+#[derive(Debug, serde::Deserialize)]
+struct VmSnapshotRequest {
+    tag: String,
+}
+
+async fn snapshot_vm(
+    State(m): State<Arc<VmManager>>,
+    Extension(role): Extension<Role>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<VmSnapshotRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_admin(role)?;
+    m.create_vm_snapshot(id, &req.tag).await?;
+    Ok(Json(json!({"ok": true, "tag": req.tag})))
+}
+
 async fn stop_vm(
     State(m): State<Arc<VmManager>>,
     Extension(role): Extension<Role>,
@@ -1196,6 +1345,10 @@ mod tests {
                 qga: None,
                 storage: Default::default(),
                 shared_folders: vec![],
+                numa_node: None,
+                cpuset: None,
+                hugepages: None,
+                vfio_devices: vec![],
             },
             guest_cid: None,
             jail_path: None,

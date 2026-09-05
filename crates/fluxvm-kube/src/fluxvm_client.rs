@@ -41,8 +41,26 @@ impl FluxVMClient {
         let network = match spec.network_mode.as_str() {
             "none" => json!({"mode": "none"}),
             "user" => json!({"mode": "user", "forwards": []}),
+            "tap" => json!({
+                "mode": "tap",
+                "tap_name": spec.tap_name,
+                "bridge": spec.bridge,
+                "mac": spec.mac,
+                "netns": spec.netns,
+            }),
+            "macvtap" => {
+                let parent = spec.parent.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!("networkMode macvtap requires spec.parent")
+                })?;
+                json!({
+                    "mode": "macvtap",
+                    "parent": parent,
+                    "macvtap_mode": spec.macvtap_mode,
+                    "mac": spec.mac,
+                })
+            }
             other => bail!(
-                "network_mode '{other}' is not supported by this CRD yet (only \"none\" and \"user\" — tap/macvtap need a device/bridge name this CRD doesn't expose)"
+                "network_mode '{other}' is not supported (use none, user, tap, or macvtap)"
             ),
         };
         let body = json!({
