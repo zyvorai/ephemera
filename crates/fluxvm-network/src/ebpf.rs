@@ -260,12 +260,26 @@ fn parse_ipv4_cidr(raw: &str) -> Result<Ipv4Cidr> {
 }
 
 fn require_command(name: &str) -> Result<()> {
-    let status = Command::new(name).arg("--version").status();
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => bail!("{name} --version exited with {s}"),
-        Err(e) => Err(e).with_context(|| format!("{name} is required for the eBPF dataplane")),
+    // iproute2's `tc` accepts `-V` / `-Version`, not GNU-style `--version`.
+    let probes: &[&[&str]] = if name == "tc" {
+        &[&["-V"], &["-Version"], &["--version"]]
+    } else {
+        &[&["--version"], &["-V"]]
+    };
+    let mut last_err: Option<String> = None;
+    for args in probes {
+        match Command::new(name).args(*args).status() {
+            Ok(s) if s.success() => return Ok(()),
+            Ok(s) => last_err = Some(format!("{name} {} exited with {s}", args.join(" "))),
+            Err(e) => {
+                return Err(e).with_context(|| format!("{name} is required for the eBPF dataplane"));
+            }
+        }
     }
+    bail!(
+        "{}",
+        last_err.unwrap_or_else(|| format!("{name} version probe failed"))
+    );
 }
 
 fn run(program: &str, args: &[String]) -> Result<()> {
