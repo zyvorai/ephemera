@@ -117,7 +117,7 @@ trust:
 This is the same isolation shape used for malware-analysis sandboxes and
 "run this untrusted PR's code" CI steps, built from primitives this project
 already has. For the FluxVm agent-sandbox track (snapshots, `/v1/sandboxes`,
-egress, AutoPause, optional TC/eBPF dataplane), see
+egress, AutoPause, optional TC/eBPF Network Fabric v3 dataplane), see
 [AI-agent sandbox gaps](../../../agent-sandbox-gaps.md),
 [Network Fabric](../../../network-fabric.md), and
 [eBPF / Cilium](../../../ebpf-cilium.md).

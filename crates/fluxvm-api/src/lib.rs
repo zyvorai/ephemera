@@ -167,6 +167,7 @@ pub fn router(manager: Arc<VmManager>) -> Router {
         .route("/v1/vms/{id}/stats", get(vm_stats))
         .route("/v1/vms/{id}/network/stats", get(vm_network_stats))
         .route("/v1/vms/{id}/network/flows", get(vm_network_flows))
+        .route("/v1/vms/{id}/network/status", get(vm_network_status))
         .route(
             "/v1/vms/{id}/network/policy",
             get(get_vm_network_policy).post(set_vm_network_policy),
@@ -832,6 +833,13 @@ async fn vm_network_stats(
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     Ok(Json(json!(m.network_stats(id).await?)))
+}
+
+async fn vm_network_status(
+    State(m): State<Arc<VmManager>>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    Ok(Json(json!(m.network_status(id).await?)))
 }
 
 #[derive(Debug, Deserialize)]

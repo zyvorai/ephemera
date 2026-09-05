@@ -69,7 +69,10 @@ impl VmBackend for FluxVmBackend {
             },
             vsock_cid: ctx.guest_cid,
             vsock_uds: ctx.vsock_socket.clone(),
-            seccomp: true,
+            // Firecracker applies its own seccomp to the guest VMM. A process-wide
+            // KillProcess filter on the FluxVM control plane races with tokio and
+            // prevents the API from answering Ping after boot starts.
+            seccomp: matches!(cfg.fluxvm_engine, FluxVmEngine::Kvm),
             engine: match cfg.fluxvm_engine {
                 FluxVmEngine::Firecracker => crate::api::FluxVmEngine::Firecracker,
                 FluxVmEngine::Kvm => crate::api::FluxVmEngine::Kvm,

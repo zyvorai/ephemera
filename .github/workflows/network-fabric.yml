@@ -10,6 +10,10 @@ name: Network Fabric
       - 'crates/fluxvm-api/**'
       - 'scripts/build-ebpf.sh'
       - 'scripts/test-ebpf-smoke.sh'
+      - 'scripts/test-network-fabric.sh'
+      - 'scripts/validate-network-fabric.sh'
+      - 'scripts/export_network_flows.py'
+      - 'scripts/test_flow_exporter.py'
       - 'deploy/k8s/**'
       - '.github/workflows/network-fabric.yml'
   push:
@@ -20,6 +24,12 @@ name: Network Fabric
       - 'crates/fluxvm-core/**'
       - 'crates/fluxvm-scheduler/**'
       - 'crates/fluxvm-api/**'
+      - 'scripts/build-ebpf.sh'
+      - 'scripts/test-ebpf-smoke.sh'
+      - 'scripts/test-network-fabric.sh'
+      - 'scripts/validate-network-fabric.sh'
+      - 'scripts/export_network_flows.py'
+      - 'scripts/test_flow_exporter.py'
 
 jobs:
   build-test:
@@ -47,6 +57,10 @@ jobs:
           sudo apt-get install -y -qq \
             libsystemd-dev libhivex-dev \
             clang llvm libbpf-dev bpftool iproute2 nftables iputils-ping
+
+      - name: Flow exporter unit tests
+        working-directory: fluxvm
+        run: python3 scripts/test_flow_exporter.py
 
       - name: Build eBPF objects
         working-directory: fluxvm

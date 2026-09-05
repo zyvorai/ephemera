@@ -10,6 +10,8 @@
 - **Snapshots** — QEMU QMP `savevm` + Cloud Hypervisor `ch-remote snapshot`; `POST /v1/vms/{id}/snapshot`.
 - **Sandbox** — `fluxvm_engine = "kvm"` (no Firecracker child), multi-port proxy defaults, native TC/eBPF dataplane (`legacy`/`ebpf`/`cilium`, default nftables), bench script + docs.
 - **eBPF / Cilium / Network Fabric v1** — TC L3+L4 allowlists, per-VM policy API (`/v1/vms/{id}/network/{policy,stats,flows}`), optional XDP node guard, flows/stats maps; modes `legacy`/`ebpf`/`cilium` (default nftables); docs: [docs/network-fabric.md](docs/network-fabric.md), [docs/ebpf-cilium.md](docs/ebpf-cilium.md).
+- **Network Fabric v2** — Mbps/PPS egress limits, fail-closed live policy reconfigure, `GET /v1/vms/{id}/network/status`, native attach without known guest IP, `scripts/validate-network-fabric.sh`.
+- **Network Fabric v3 GA** — IPv4/IPv6 TC+XDP policy, schema versioning + policy fingerprints, TC/XDP program-ID ownership, pre-attach map config, orphan pin reconcile, NDJSON flow exporter (`scripts/export_network_flows.py`).
 - **Windows** — `unattend_path` / `sysprep` on `build-image` `windows{}`.
 - **QEMU placement** — optional `numa_node`, `cpuset`, `hugepages`, `vfio_devices` on create.
 - Richer Prometheus metrics (auth/egress denies, create/start latency).
@@ -20,8 +22,9 @@
   `ping -I` fails and `/sys` remounts drop bpffs pins across separate execs.
 
 ### Changed
-- Docs/README refreshed for Network Fabric v1 (L4 ports, REST, XDP meta paths,
-  `LimitMEMLOCK`, dual-netns smoke).
+- Docs/README refreshed for Network Fabric v1–v3 (architecture diagrams, L4 ports,
+  IPv6, rate limits, REST status/schema, XDP meta paths, `LimitMEMLOCK`, dual-netns
+  smoke, e2e).
 
 ## 0.3.0
 

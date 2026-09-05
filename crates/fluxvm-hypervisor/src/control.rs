@@ -34,9 +34,19 @@ pub async fn serve(
     info!(path = %api_sock.display(), "fluxvm-hypervisor API listening");
 
     let state = Arc::new(Mutex::new(VmState::new()));
+
+    // Accept connections (including Ping) while the initial boot runs. The
+    // control-plane waits on Ping with a short timeout and must not block on
+    // Firecracker/KVM bring-up completing first.
     if let Some(boot) = initial {
-        let mut st = state.lock().await;
-        boot_inner(&mut st, boot, &workspace).await?;
+        let state_boot = Arc::clone(&state);
+        let workspace_boot = workspace.clone();
+        tokio::spawn(async move {
+            let mut st = state_boot.lock().await;
+            if let Err(e) = boot_inner(&mut st, boot, &workspace_boot).await {
+                warn!(error = %e, "initial boot_config failed");
+            }
+        });
     }
 
     loop {

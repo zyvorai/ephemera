@@ -36,8 +36,10 @@ reaper_interval_secs = 5
 # pin_root = "/sys/fs/bpf/fluxvm"
 # required = false
 # default_allow = true
-# allow_cidrs = ["10.0.0.0/8"]
+# allow_cidrs = ["10.0.0.0/8", "2001:db8:1234::/48"]
 # allow_ports = ["tcp/443", "udp/53"]
+# max_egress_mbps = 250                # native eBPF only; no nftables fallback
+# max_egress_pps = 100000              # native eBPF only
 # sample_rate = 100                     # 0 = off; N ≈ 1/N allowed-flow samples
 #
 # Standalone node-ingress XDP blocklist. Leave disabled with Cilium
@@ -48,7 +50,7 @@ reaper_interval_secs = 5
 # bpf_object = "/usr/lib/fluxvm/bpf/fluxvm_xdp.bpf.o"
 # pin_root = "/sys/fs/bpf/fluxvm"
 # required = false
-# block_cidrs = ["198.51.100.0/24"]
+# block_cidrs = ["198.51.100.0/24", "2001:db8:bad::/48"]
 #
 # [[sandbox.credential_vault]]
 # host = "api.openai.com"

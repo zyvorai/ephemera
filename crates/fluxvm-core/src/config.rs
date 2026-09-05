@@ -152,10 +152,15 @@ pub struct DataplaneConfig {
     /// Default action when no CIDR entry matches. `true` preserves the
     /// pre-eBPF allow-all behavior until an operator opts into deny-by-default.
     pub default_allow: bool,
-    /// IPv4 destination CIDRs allowed by the native eBPF LPM trie.
+    /// IPv4/IPv6 destination CIDRs allowed by the native eBPF LPM tries.
+    /// IPv6 policy is native-only and will not silently downgrade to nftables.
     pub allow_cidrs: Vec<String>,
     /// L4 allowlist entries (`tcp/443`, `udp/53`, …).
     pub allow_ports: Vec<String>,
+    /// Native eBPF fixed-window bandwidth ceiling (megabits/second).
+    pub max_egress_mbps: Option<u32>,
+    /// Native eBPF fixed-window packet-rate ceiling.
+    pub max_egress_pps: Option<u32>,
     /// Allowed-flow ringbuf sampling: 0=off, N≈1/N packets.
     pub sample_rate: u32,
     /// Optional standalone node-ingress XDP guard (disabled with Cilium).
@@ -172,6 +177,8 @@ impl Default for DataplaneConfig {
             default_allow: true,
             allow_cidrs: Vec::new(),
             allow_ports: Vec::new(),
+            max_egress_mbps: None,
+            max_egress_pps: None,
             sample_rate: 0,
             xdp: XdpConfig::default(),
         }
@@ -186,6 +193,7 @@ pub struct XdpConfig {
     pub bpf_object: PathBuf,
     pub pin_root: PathBuf,
     pub required: bool,
+    /// IPv4/IPv6 source CIDRs rejected at XDP.
     pub block_cidrs: Vec<String>,
 }
 
