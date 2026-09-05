@@ -457,9 +457,8 @@ impl VmManager {
         let previous = fluxvm_network::dataplane::load_policy(&self.cfg, id)?;
         fluxvm_network::dataplane::save_policy(&self.cfg, id, &policy)?;
 
-        if (vm.status == VmStatus::Running || vm.status == VmStatus::Paused)
-            && vm.backend == BackendKind::FluxVm
-        {
+        if vm.status == VmStatus::Running || vm.status == VmStatus::Paused {
+
             let guest_cidr = vm.guest_ip.as_deref().map(|ip| format!("{ip}/32"));
             let iface = fluxvm_network::dataplane_interface_name(
                 id,
@@ -682,7 +681,9 @@ impl VmManager {
                 .clone()
                 .or_else(|| record.guest_ip.as_ref().map(|ip| format!("{ip}/32")));
 
-            if req.backend == BackendKind::FluxVm {
+            // Fabric and most production drivers use QEMU/CH/FC with TAP+netns;
+            // attach the VM-edge dataplane for every backend (not only flux-vm).
+            {
                 let allow_cidrs = if self.cfg.sandbox.egress_allow_domains.is_empty() {
                     vec![]
                 } else {
@@ -746,9 +747,7 @@ impl VmManager {
         .await;
 
         if let Err(e) = result {
-            if req.backend == BackendKind::FluxVm {
-                let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, id);
-            }
+            let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, id);
             if let Some(tap) = &record.tap_name {
                 let _ = fluxvm_network::cleanup(
                     &self.cfg.state_dir,
@@ -909,7 +908,8 @@ impl VmManager {
             let nbd_export =
                 (vm.request.storage == StorageBackend::Nbd).then(|| vm.workspace.join("nbd.sock"));
 
-            if vm.backend == BackendKind::FluxVm {
+            // Same as create: attach for QEMU/CH/FC as well as flux-vm.
+            {
                 let allow_cidrs = if self.cfg.sandbox.egress_allow_domains.is_empty() {
                     vec![]
                 } else {
@@ -973,9 +973,7 @@ impl VmManager {
         .await;
 
         if let Err(e) = result {
-            if vm.backend == BackendKind::FluxVm {
-                let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, id);
-            }
+            let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, id);
             if let Some(tap) = &vm.tap_name {
                 let _ = fluxvm_network::cleanup(
                     &self.cfg.state_dir,
@@ -1018,9 +1016,7 @@ impl VmManager {
                 }
             }
         }
-        if vm.backend == BackendKind::FluxVm {
-            let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, id);
-        }
+        let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, id);
         if let Some(tap) = &vm.tap_name {
             let _ = fluxvm_network::cleanup(
                 &self.cfg.state_dir,
@@ -1256,9 +1252,7 @@ impl VmManager {
             }
         }
         let vm = self.store.remove(id).await?.context("VM vanished")?;
-        if vm.backend == BackendKind::FluxVm {
-            let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, id);
-        }
+        let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, id);
         let _ = fluxvm_network::dataplane::delete_policy(&self.cfg, id);
         self.activity.lock().await.remove(&id);
         // These three point at live state outside `workspace` (a
@@ -1308,10 +1302,7 @@ impl VmManager {
                         let mut vm = vm;
                         vm.status = VmStatus::Stopped;
                         vm.pid = None;
-                        if vm.backend == BackendKind::FluxVm {
-                            let _ =
-                                fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, vm.id);
-                        }
+                        let _ = fluxvm_network::dataplane::remove_sandbox_policy(&self.cfg, vm.id);
                         if let Some(tap) = &vm.tap_name {
                             let _ = fluxvm_network::cleanup(
                                 &self.cfg.state_dir,
@@ -1334,9 +1325,8 @@ impl VmManager {
 
                     // Daemon restart / package upgrades can leave a live VMM
                     // while TC pins/filters are missing or on an older schema.
-                    if vm.backend == BackendKind::FluxVm
-                        && self.cfg.sandbox.dataplane.mode
-                            != fluxvm_core::config::DataplaneMode::Legacy
+                    if self.cfg.sandbox.dataplane.mode
+                        != fluxvm_core::config::DataplaneMode::Legacy
                     {
                         let needs_repair = fluxvm_network::dataplane::status(&self.cfg, vm.id)
                             .map(|s| !s.attached || !s.schema_compatible || !s.policy_synced)
@@ -1392,14 +1382,7 @@ impl VmManager {
         }
 
         // Stale UUID pins are safe to collect only after the VM record is gone.
-        let live_ids: Vec<Uuid> = self
-            .store
-            .list()
-            .await
-            .into_iter()
-            .filter(|vm| vm.backend == BackendKind::FluxVm)
-            .map(|vm| vm.id)
-            .collect();
+        let live_ids: Vec<Uuid> = self.store.list().await.into_iter().map(|vm| vm.id).collect();
         if let Err(e) = fluxvm_network::dataplane::reconcile_orphan_pins(&self.cfg, &live_ids) {
             tracing::warn!(error = %e, "failed to reconcile orphan FluxVM eBPF pins");
         }
